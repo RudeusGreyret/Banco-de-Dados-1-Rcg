@@ -29,6 +29,8 @@ def conectar():
     db.execute("""CREATE TABLE IF NOT EXISTS previsao_servico
         (dia TEXT NOT NULL, funcao TEXT NOT NULL, descricao TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (dia, funcao))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS categoria_dia
+        (dia TEXT PRIMARY KEY, tipo TEXT NOT NULL CHECK(tipo IN ('PRETA','VERMELHA')))""")
     db.commit()
     return db
 
@@ -42,22 +44,91 @@ def escala(inicio, fim):
         "SELECT * FROM escala WHERE dia BETWEEN ? AND ?",
         db, params=(inicio.isoformat(), fim.isoformat()))
 
+def pascoa(ano):
+    """Computus gregoriano para apuração da Sexta-Feira Santa."""
+    a = ano % 19
+    b, c = divmod(ano, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mes = (h + l - 7 * m + 114) // 31
+    dia = (h + l - 7 * m + 114) % 31 + 1
+    return date(ano, mes, dia)
+
+
+def feriados_nacionais(ano):
+    fixos = {
+        (1, 1): "Confraternização Universal",
+        (4, 21): "Tiradentes",
+        (5, 1): "Dia do Trabalho",
+        (9, 7): "Independência do Brasil",
+        (10, 12): "Nossa Senhora Aparecida",
+        (11, 2): "Finados",
+        (11, 15): "Proclamação da República",
+        (11, 20): "Consciência Negra",
+        (12, 25): "Natal",
+    }
+    feriados = {date(ano, mes, dia): nome for (mes, dia), nome in fixos.items()}
+    feriados[pascoa(ano) - timedelta(days=2)] = "Paixão de Cristo"
+    return feriados
+
+
+def motivo_calendario(d):
+    if d.weekday() >= 5:
+        return "Fim de semana"
+    return feriados_nacionais(d.year).get(d)
+
+
 def categoria(d):
-    return "VERMELHA" if d.weekday() >= 5 else "PRETA"
+    ajuste = db.execute("SELECT tipo FROM categoria_dia WHERE dia=?", (d.isoformat(),)).fetchone()
+    if ajuste:
+        return ajuste[0]
+    return "VERMELHA" if motivo_calendario(d) else "PRETA"
+
+
+def verificar_consecutivos(militar_id, dia):
+    anterior = (dia - timedelta(days=1)).isoformat()
+    return bool(db.execute(
+        "SELECT 1 FROM escala WHERE militar_id=? AND dia=? AND valor='SV' LIMIT 1",
+        (militar_id, anterior)
+    ).fetchone())
+
 
 def gerar(inicio, qtd, recalcular):
     ps = pessoas()
     if ps.empty:
         return 0, ["Cadastre militares primeiro."]
-    contagem = dict(db.execute(
-        "SELECT militar_id, COUNT(*) FROM escala WHERE valor='SV' GROUP BY militar_id").fetchall())
+    # Contadores independentes de escala PRETA e VERMELHA.
+    contagens = {int(p.id): {"PRETA": 0, "VERMELHA": 0} for p in ps.itertuples()}
+    historico = db.execute(
+        "SELECT dia,militar_id FROM escala WHERE valor='SV' ORDER BY dia"
+    ).fetchall()
+    # Reconstruir as contagens a partir do calendário atual, inclusive ajustes manuais.
+    # Ao recalcular, desconsiderar as designações automáticas dentro do período.
+    automaticos_no_periodo = {
+        (r[0], int(r[1])) for r in db.execute(
+            "SELECT dia,militar_id FROM escala WHERE manual=0 AND valor='SV' AND dia BETWEEN ? AND ?",
+            (inicio.isoformat(), (inicio + timedelta(days=qtd - 1)).isoformat())
+        ).fetchall()
+    } if recalcular else set()
+    for dia_str, mid in historico:
+        if (dia_str, int(mid)) in automaticos_no_periodo:
+            continue
+        if int(mid) in contagens:
+            contagens[int(mid)][categoria(date.fromisoformat(dia_str))] += 1
     gerados, avisos = 0, []
     with db:
         for n in range(qtd):
             dia = inicio + timedelta(days=n)
             ds = dia.isoformat()
+            tipo_dia = categoria(dia)
             existentes = db.execute(
-                "SELECT militar_id, valor, manual FROM escala WHERE dia=?", (ds,)).fetchall()
+                "SELECT militar_id, valor, manual FROM escala WHERE dia=?", (ds,)
+            ).fetchall()
             fixos = [r for r in existentes if r[2] and r[1] == "SV"]
             if len(fixos) > 1:
                 avisos.append(f"{dia:%d/%m/%Y}: vários serviços fixados manualmente.")
@@ -68,23 +139,43 @@ def gerar(inicio, qtd, recalcular):
                 continue
             if recalcular:
                 db.execute("DELETE FROM escala WHERE dia=? AND manual=0", (ds,))
-            impedidos = {r[0] for r in existentes if r[2]}
+            impedidos = {int(r[0]) for r in existentes if r[2]}
             elegiveis = ps[
                 (ps.status == "ATIVO")
-                & (ps.tipo.isin(["AMBAS", categoria(dia)]))
+                & (ps.tipo.isin(["AMBAS", tipo_dia]))
                 & (~ps.id.isin(impedidos))
             ]
             if elegiveis.empty:
-                avisos.append(f"{dia:%d/%m/%Y}: sem militar elegível.")
+                avisos.append(f"{dia:%d/%m/%Y}: não há militar disponível para {tipo_dia}.")
                 continue
-            escolhido = min(elegiveis.itertuples(),
-                            key=lambda p: (contagem.get(p.id, 0), p.ord, p.id))
+            descansados = [
+                p for p in elegiveis.itertuples()
+                if not verificar_consecutivos(int(p.id), dia)
+            ]
+            # Só aceitar serviço em dias consecutivos se não houver outra pessoa
+            # elegível; a exceção é registrada como aviso.
+            candidatos = descansados if descansados else list(elegiveis.itertuples())
+            if not descansados:
+                avisos.append(
+                    f"{dia:%d/%m/%Y}: EXCEÇÃO — militar com serviço no dia anterior "
+                    "por falta de outro elegível. Revisar antes de publicar."
+                )
+            escolhido = min(
+                candidatos,
+                key=lambda p: (
+                    contagens[int(p.id)][tipo_dia],
+                    sum(contagens[int(p.id)].values()),
+                    int(p.ord), int(p.id)
+                )
+            )
             db.execute(
                 "INSERT OR REPLACE INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,0)",
-                (ds, int(escolhido.id), "SV"))
-            contagem[escolhido.id] = contagem.get(escolhido.id, 0) + 1
+                (ds, int(escolhido.id), "SV")
+            )
+            contagens[int(escolhido.id)][tipo_dia] += 1
             gerados += 1
     return gerados, avisos
+
 
 st.markdown("""<style>
 :root {color-scheme: dark;}
@@ -160,7 +251,7 @@ with st.sidebar:
         inicio = st.date_input("Início", value=date.today().replace(day=1), format="DD/MM/YYYY")
         qtd = st.selectbox("Quantidade de dias", [7, 14, 21, 28, 31], index=3)
         filtro = st.selectbox("Subunidade", ["Todas"] + SU)
-        st.caption("PRETA: dias úteis | VERMELHA: fins de semana. Regras de descanso ainda não implementadas.")
+        st.caption("PRETA: dias úteis comuns | VERMELHA: fins de semana e feriados nacionais. Ajustes extraordinários por data na Previsão.")
     else:
         st.caption("Em preparação — sem alterações no banco de dados.")
 
@@ -203,7 +294,7 @@ with quadro:
     a.metric("Militares", len(ps))
     b.metric("Serviços no período", int((servicos.valor == "SV").sum()) if not servicos.empty else 0)
     c.metric("Células manuais", int(servicos.manual.sum()) if not servicos.empty else 0)
-    st.markdown('<div class="legend">🔴 Vermelha: sábado e domingo &nbsp;&nbsp; ⚫ Preta: segunda a sexta &nbsp;&nbsp; ✏️ Alterações manuais preservadas</div>', unsafe_allow_html=True)
+    st.markdown('<div class="legend">🔴 Vermelha: feriados nacionais e fins de semana &nbsp;&nbsp; ⚫ Preta: demais dias &nbsp;&nbsp; ✏️ Correções manuais preservadas</div>', unsafe_allow_html=True)
     if ps.empty:
         st.info("Nenhum militar cadastrado nesta seleção. Acesse a aba Efetivo para começar.")
     else:
@@ -244,6 +335,51 @@ with quadro:
 with previsao_tab:
     st.subheader("🗓️ PREVISÃO DA ESCALA — 1º RCG")
     st.caption("Funções nas linhas e datas nas colunas, conforme o modelo enviado.")
+    st.markdown("#### 📆 Tipo de escala por data")
+    st.caption("Calendário automático: dias úteis = PRETA; feriados nacionais e fins de semana = VERMELHA. Para situações extraordinárias, mude só a classificação do dia. AUTO restaura o calendário.")
+    tipos_dia = []
+    for d in datas:
+        manual_dia = db.execute("SELECT tipo FROM categoria_dia WHERE dia=?", (d.isoformat(),)).fetchone()
+        tipos_dia.append({
+            "Data": d.strftime("%d/%m/%Y"),
+            "Dia": NOMES_DIAS[d.weekday()],
+            "Motivo": motivo_calendario(d) or "Dia útil comum",
+            "Classificação": categoria(d),
+            "Alteração extraordinária": manual_dia[0] if manual_dia else "AUTO"
+        })
+    tipos_originais = pd.DataFrame(tipos_dia)
+    tipos_editados = st.data_editor(
+        tipos_originais,
+        use_container_width=True, hide_index=True,
+        disabled=["Data", "Dia", "Motivo", "Classificação"],
+        column_config={
+            "Alteração extraordinária": st.column_config.SelectboxColumn(
+                "Alteração extraordinária", options=["AUTO", "PRETA", "VERMELHA"],
+                required=True
+            )
+        },
+        key=f"categorias_datas_{inicio.isoformat()}_{qtd}"
+    )
+    if st.button("💾 Salvar tipos de escala por data", type="primary", key="salvar_categorias"):
+        alteracoes_datas = 0
+        with db:
+            for idx, d in enumerate(datas):
+                novo = tipos_editados.iloc[idx]["Alteração extraordinária"]
+                anterior = tipos_originais.iloc[idx]["Alteração extraordinária"]
+                if novo == anterior:
+                    continue
+                if novo == "AUTO":
+                    db.execute("DELETE FROM categoria_dia WHERE dia=?", (d.isoformat(),))
+                else:
+                    db.execute(
+                        "INSERT OR REPLACE INTO categoria_dia(dia,tipo) VALUES (?,?)",
+                        (d.isoformat(), novo)
+                    )
+                alteracoes_datas += 1
+        st.success(f"{alteracoes_datas} data(s) atualizada(s).")
+        if alteracoes_datas:
+            st.rerun()
+    st.divider()
     st.info("Previsão manual, independente do quadro de serviço. A geração automática por função depende de regras próprias.", icon="ℹ️")
     linhas = [(grupo, funcao, f"{grupo}::{funcao}")
               for grupo, funcoes in FUNCOES_PREVISAO.items() for funcao in funcoes]
@@ -317,7 +453,7 @@ with previsao_tab:
 with automatico:
     st.subheader("⚙️ Gerador de escala")
     recalcular = st.checkbox("Recalcular somente serviços automáticos", value=True)
-    st.write("Edições manuais ficam preservadas. Um militar é designado por dia, privilegiando menor número de serviços.")
+    st.write("Cada serviço dura 24 horas. O gerador evita serviços em dias seguidos, com exceção sinalizada se não houver outro militar elegível. Contagens PRETA e VERMELHA são equilibradas separadamente; cada serviço exige ao menos o dia seguinte livre, sempre que possível. Edições manuais são preservadas.")
     if st.button("Gerar escala", type="primary"):
         numero, avisos = gerar(inicio, qtd, recalcular)
         st.success(f"{numero} serviço(s) gerado(s).")
@@ -325,7 +461,7 @@ with automatico:
             st.warning(aviso)
         if numero:
             st.rerun()
-    st.info("A lógica ainda não considera descanso mínimo, feriados, antiguidade ou regras oficiais. Revise antes de utilizar.")
+    st.info("O descanso implementado impede, em condições normais, serviço em dois dias consecutivos. Feriados locais, pontos facultativos, regras de antiguidade e descanso maior precisam de validação e ajustes. Revise o resultado antes de utilizar.")
 
 with cadastro:
     topo, acao = st.columns([3, 1], vertical_alignment="center")
