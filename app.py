@@ -5,6 +5,9 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="SisBol | Escalas 1º RCG", page_icon="📅", layout="wide")
+
+from auth import exigir_login
+exigir_login()
 DB = Path(__file__).with_name("escala_local.db")
 SU = ["EM", "1º Esqd", "2º Esqd", "3º Esqd", "Esqd Crm", "Esqd C Ap", "CHDI", "Fanfarra"]
 DIAS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
