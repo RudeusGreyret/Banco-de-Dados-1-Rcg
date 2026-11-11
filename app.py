@@ -110,8 +110,13 @@ button[data-baseweb="tab"][aria-selected="true"] {background:#23466a;color:#fff;
 </style>""", unsafe_allow_html=True)
 # Foto de fundo opcional; carregada apenas na aplicação após o login.
 foto_fundo = Path(__file__).with_name("fundo.jpg")
-if foto_fundo.is_file():
-    imagem_b64 = base64.b64encode(foto_fundo.read_bytes()).decode("ascii")
+foto_compacta = Path(__file__).with_name("fundo.b64")
+imagem_b64 = (
+    base64.b64encode(foto_fundo.read_bytes()).decode("ascii")
+    if foto_fundo.is_file()
+    else foto_compacta.read_text(encoding="utf-8").strip() if foto_compacta.is_file() else ""
+)
+if imagem_b64:
     st.markdown(
         "<style>"
         ".stApp {background-image:linear-gradient(rgba(7,19,35,.87),rgba(7,19,35,.92)),"
