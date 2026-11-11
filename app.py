@@ -140,11 +140,34 @@ st.info("Ambiente de testes com login administrativo. Utilize somente dados fict
 
 with st.sidebar:
     st.header("🐉 Escala Dragão")
-    st.caption("Filtros e período da escala")
-    inicio = st.date_input("Início", value=date.today().replace(day=1), format="DD/MM/YYYY")
-    qtd = st.selectbox("Quantidade de dias", [7, 14, 21, 28, 31], index=3)
-    filtro = st.selectbox("Subunidade", ["Todas"] + SU)
-    st.caption("PRETA: dias úteis | VERMELHA: fins de semana. Regras de descanso ainda não implementadas.")
+    st.caption("MENU DE ESCALAS")
+    # As novas escalas são apenas áreas de navegação; ainda não fazem
+    # leitura ou gravação de escala no banco atual.
+    escala_aberta = st.radio(
+        "Selecionar escala",
+        ["📅 Escala principal", "🛡️ Escala da Guarda", "🎖️ Oficial de Dia",
+         "🔰 Cabo de Dia", "📋 Sargento de Dia"],
+        label_visibility="collapsed",
+        key="menu_escalas"
+    )
+    st.divider()
+    if escala_aberta == "📅 Escala principal":
+        st.caption("FILTROS DA ESCALA PRINCIPAL")
+        inicio = st.date_input("Início", value=date.today().replace(day=1), format="DD/MM/YYYY")
+        qtd = st.selectbox("Quantidade de dias", [7, 14, 21, 28, 31], index=3)
+        filtro = st.selectbox("Subunidade", ["Todas"] + SU)
+        st.caption("PRETA: dias úteis | VERMELHA: fins de semana. Regras de descanso ainda não implementadas.")
+    else:
+        st.caption("Em preparação — sem alterações no banco de dados.")
+
+if escala_aberta != "📅 Escala principal":
+    st.markdown(f"### {escala_aberta}")
+    st.info(
+        "Esta área já está no menu lateral. O cadastro, as regras e as escalas "
+        "específicas serão configurados antes de ativar a geração automática."
+    )
+    st.caption("As escalas existentes e os cadastros não são modificados ao abrir esta seção.")
+    st.stop()
 
 ps_all = pessoas()
 ps = ps_all if filtro == "Todas" else ps_all[ps_all.su == filtro]
