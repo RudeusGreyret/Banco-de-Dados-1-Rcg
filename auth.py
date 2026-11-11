@@ -5,10 +5,10 @@ import time
 import streamlit as st
 
 def exigir_login():
-    usuario_config = os.environ.get("ESCALA_DRAGAO_ADMIN_USER", "").strip()
-    senha_config = os.environ.get("ESCALA_DRAGAO_ADMIN_PASSWORD", "")
+    usuario_config = os.environ.get("SISBOL_ADMIN_USER", "").strip()
+    senha_config = os.environ.get("SISBOL_ADMIN_PASSWORD", "")
     if not usuario_config or len(senha_config) < 12:
-        st.error("Acesso bloqueado: configure ESCALA_DRAGAO_ADMIN_USER e ESCALA_DRAGAO_ADMIN_PASSWORD (mínimo 12 caracteres) no Render.")
+        st.error("Acesso bloqueado: configure SISBOL_ADMIN_USER e SISBOL_ADMIN_PASSWORD (mínimo 12 caracteres) no Render.")
         st.stop()
 
     if st.session_state.get("autenticado") is True:
