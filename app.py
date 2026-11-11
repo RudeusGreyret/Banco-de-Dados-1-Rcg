@@ -13,6 +13,7 @@ SU = ["EM", "1º Esqd", "2º Esqd", "3º Esqd", "Esqd Crm", "Esqd C Ap", "CHDI",
 DIAS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
 
 from google_sheets_store import conectar_google_sheets, GoogleSheetsError
+from escalas_funcionais import exibir_escala, SERVICOS
 
 @st.cache_resource
 def conectar():
@@ -302,9 +303,21 @@ with st.sidebar:
     st.caption("PRETA: dias úteis comuns | VERMELHA: fins de semana e feriados nacionais.")
 
 if escala_aberta not in ("🗓️ Previsão da Escala", "👥 Militares por Escala"):
-    st.markdown(f"### {escala_aberta}")
-    st.info("A navegação desta escala está preparada. A distribuição específica de cada função ainda será configurada; os dados existentes não são alterados.")
-    st.caption("Volte à Previsão da Escala para consultar o quadro geral, as configurações por dia e o cadastro.")
+    mapa_navegacao = {
+        "🎖️ Oficial de Dia": "Oficial de Dia",
+        "📋 Adjunto de Dia": "Adjunto de Dia",
+        "🛡️ Comandante da Guarda": "Comandante da Guarda",
+        "🔰 Cabo da Guarda": "Cabo da Guarda",
+        "🚗 Motorista de Dia": "Motorista de Dia",
+    }
+    servico_selecionado = mapa_navegacao.get(escala_aberta)
+    if servico_selecionado:
+        exibir_escala(
+            db, servico_selecionado, inicio, qtd,
+            pessoas(), lotacoes_atuais(), categoria
+        )
+    else:
+        st.info("Escolha uma escala no menu.")
     st.stop()
 
 ps_all = pessoas()
@@ -470,8 +483,8 @@ CORES_PREVISAO = {
 }
 NOMES_DIAS = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA",
               "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
-quadro, previsao_tab, automatico, cadastro = st.tabs(
-    ["📋 Quadro de serviço", "🗓️ Previsão da escala", "⚙️ Escala automática", "👥 Efetivo"]
+previsao_tab, quadro, automatico, cadastro = st.tabs(
+    ["🗓️ Previsão da escala", "📋 Quadro geral (legado)", "⚙️ Gerador geral (legado)", "👥 Efetivo"]
 )
 with quadro:
     a, b, c = st.columns(3)
@@ -749,7 +762,8 @@ with previsao_tab:
 
 
 with automatico:
-    st.subheader("⚙️ Gerador de escala")
+    st.subheader("⚙️ Gerador geral (legado)")
+    st.warning("Esse gerador pertence ao quadro geral antigo. Para gerar os cinco serviços separados, utilize cada opção no menu lateral.")
     recalcular = st.checkbox("Recalcular somente serviços automáticos", value=True)
     st.write("Cada serviço dura 24 horas. O gerador evita serviços em dias seguidos, com exceção sinalizada se não houver outro militar elegível. Contagens PRETA e VERMELHA são equilibradas separadamente; cada serviço exige ao menos o dia seguinte livre, sempre que possível. Edições manuais são preservadas.")
     if st.button("Gerar escala", type="primary"):
