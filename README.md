@@ -1,4 +1,4 @@
-# SisBol — Escalas do 1º RCG
+# Escala Dragão — Escalas do 1º RCG
 
 Protótipo de escala de serviço em Python e Streamlit.
 
@@ -30,8 +30,8 @@ O aplicativo cria automaticamente um banco SQLite local `escala_local.db`, ignor
 
 ## Login administrativo (Render)
 Configure em **Render → Web Service → Environment**:
-- `SISBOL_ADMIN_USER`: identificador do administrador
-- `SISBOL_ADMIN_PASSWORD`: senha única forte de pelo menos 12 caracteres
+- `ESCALA_DRAGAO_ADMIN_USER`: identificador do administrador
+- `ESCALA_DRAGAO_ADMIN_PASSWORD`: senha única forte de pelo menos 12 caracteres
 
 O aplicativo **bloqueia o acesso** se as variáveis não estiverem configuradas. Nunca salve credenciais no repositório. Após salvar as variáveis, atualize a implantação do serviço.
 
