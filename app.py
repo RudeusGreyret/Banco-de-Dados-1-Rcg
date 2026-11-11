@@ -488,7 +488,7 @@ with quadro:
             linha = {"ID": p.id, "Ord": p.ord, "Nome": p.nome, "SU": p.su,
                      "Status": p.status, "OBS": p.obs, "Escala": p.tipo}
             for d, titulo in zip(datas, rotulos):
-                linha[titulo] = indice.get((p.id, d.isoformat()), ("", False))[0]
+                linha[titulo] = ("0" if indice.get((p.id, d.isoformat()), ("", False))[0] == "SV" else indice.get((p.id, d.isoformat()), ("", False))[0])
             linhas.append(linha)
         original = pd.DataFrame(linhas)
 
@@ -511,7 +511,7 @@ with quadro:
             for d, titulo in zip(datas, rotulos):
                 marcacao = indice.get((int(p.id), d.isoformat()), ("", False))[0]
                 if marcacao == "SV":
-                    visual[titulo] = "SV"
+                    visual[titulo] = "0"
                     ultima_data = d
                     dias_livres = 0
                 else:
@@ -527,7 +527,7 @@ with quadro:
                     )
             visualizacao.append(visual)
         st.markdown("#### 📆 Dias sem serviço")
-        st.caption("SV = serviço de 24h (zera a contagem). Sem SV = 1, 2, 3… a partir do último serviço registrado. IMP continua contado como dia sem serviço.")
+        st.caption("0 = dia de serviço de 24h. Nos dias sem serviço: 1, 2, 3…; IMP continua contado como dia sem serviço.")
         st.dataframe(
             pd.DataFrame(visualizacao), hide_index=True,
             use_container_width=True, height=430,
@@ -539,7 +539,7 @@ with quadro:
         )
         st.caption("Se não existir serviço anterior registrado, a contagem começa em 1 no início do período exibido.")
         with st.expander("✏️ Editar escala manualmente", expanded=False):
-            st.caption("Altere somente as datas: SV = serviço, IMP = impedimento, — = sem serviço. Clique em Salvar.")
+            st.caption("Altere somente as datas: 0 = serviço, IMP = impedimento, — = sem serviço. Clique em Salvar.")
             alterado = st.data_editor(
                 original, hide_index=True, use_container_width=True, height=520,
                 disabled=["ID", "Ord", "Nome", "SU", "Status", "OBS", "Escala"],
@@ -548,7 +548,7 @@ with quadro:
                     "Nome": st.column_config.TextColumn("Nome", pinned=True, disabled=True, width="medium"),
                     "SU": st.column_config.TextColumn("SU", pinned=True, disabled=True, width="small"),
                     **{titulo: st.column_config.SelectboxColumn(
-                        titulo, options=["", "SV", "IMP", "—"], width="small"
+                        titulo, options=["", "0", "IMP", "—"], width="small"
                     ) for titulo in rotulos},
                 },
                 key=f"grade-{inicio}-{qtd}-{filtro}")
@@ -561,11 +561,11 @@ with quadro:
                             if novo != original.at[i, titulo]:
                                 db.execute(
                                     "INSERT INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,1) ON CONFLICT (dia,militar_id) DO UPDATE SET valor=EXCLUDED.valor, manual=EXCLUDED.manual",
-                                    (d.isoformat(), int(row["ID"]), novo))
+                                    (d.isoformat(), int(row["ID"]), "SV" if novo == "0" else novo))
                                 total += 1
                 st.success(f"{total} alteração(ões) registrada(s).")
                 st.rerun()
-        csv = original.drop(columns=["ID"]).to_csv(index=False, sep=";").encode("utf-8-sig")
+        csv = pd.DataFrame(visualizacao).to_csv(index=False, sep=";").encode("utf-8-sig")
         st.download_button("⬇️ Exportar CSV", csv,
                            file_name=f"escala_{inicio.isoformat()}.csv", mime="text/csv")
 
