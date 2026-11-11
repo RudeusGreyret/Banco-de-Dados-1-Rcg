@@ -82,15 +82,41 @@ def gerar(inicio, qtd, recalcular):
     return gerados, avisos
 
 st.markdown("""<style>
-.stApp {background:#f5f7fb}
-h1 {color:#162e49}
-[data-testid="stMetric"] {background:white;padding:12px;border:1px solid #e1e8f0;border-radius:10px}
+:root {color-scheme: dark;}
+.stApp {background:linear-gradient(160deg,#091526 0%,#101e33 60%,#0c182a 100%);color:#e9f1fc;}
+[data-testid="stSidebar"] {background:#0b1628;border-right:1px solid #273b54;}
+[data-testid="stSidebar"] * {color:#e5eefb;}
+.block-container {max-width:1700px;padding-top:1.5rem;padding-bottom:3rem;}
+h1,h2,h3 {color:#f3f7fc !important;letter-spacing:-.025em;}
+h1 {font-size:2rem !important;}
+p, label {color:#d5e1f0;}
+[data-testid="stMetric"] {background:#14253b;padding:20px;border:1px solid #29405c;border-radius:14px;box-shadow:0 5px 18px #0002;}
+[data-testid="stMetricLabel"] {color:#b9cce2;}
+[data-testid="stMetricValue"] {color:#f8fafc;}
+[data-baseweb="tab-list"] {gap:.65rem;background:#132339;padding:.45rem;border-radius:12px;}
+button[data-baseweb="tab"] {color:#b9cce2;border-radius:9px;padding:10px 16px;}
+button[data-baseweb="tab"][aria-selected="true"] {background:#23466a;color:#fff;}
+[data-testid="stDataFrame"] {border:1px solid #314964;border-radius:12px;overflow:hidden;}
+[data-testid="stForm"] {background:#13243b;border:1px solid #2b4260;border-radius:14px;padding:1.1rem;}
+[data-testid="stAlert"] {border-radius:10px;}
+[data-testid="stHeader"] {background:transparent;}
+.brand {border:1px solid #345477;border-left:5px solid #e2b45d;background:linear-gradient(115deg,#162d4a,#102039);padding:22px 26px;border-radius:16px;margin-bottom:15px;}
+.brand .eyebrow {color:#e4bf77;font-size:12px;letter-spacing:2px;font-weight:750;}
+.brand .name {font-size:clamp(28px,3.5vw,42px);font-weight:800;color:white;margin:3px 0;}
+.brand .sub {color:#bfd0e5;font-size:14px;}
+.legend {color:#cbd8e8;margin:8px 0 12px;font-size:13px;}
+@media (max-width:700px) {.block-container{padding:1rem .65rem}.brand{padding:18px 15px}}
 </style>""", unsafe_allow_html=True)
-st.title("Escala Dragão | Escalas — 1º RCG")
-st.warning("PROTÓTIPO SEM LOGIN: use apenas dados fictícios. Não exponha esta aplicação à internet.", icon="🔒")
+st.markdown("""<div class="brand">
+<div class="eyebrow">1º REGIMENTO DE CAVALARIA DE GUARDAS • CONTROLE DE SERVIÇO</div>
+<div class="name">🐉 Escala Dragão</div>
+<div class="sub">Painel de escalas · Geração automática e ajustes manuais</div>
+</div>""", unsafe_allow_html=True)
+st.info("Ambiente de testes com login administrativo. Utilize somente dados fictícios: controle por SU, auditoria e armazenamento persistente ainda não estão implementados.", icon="🔐")
 
 with st.sidebar:
-    st.header("Configurações")
+    st.header("🐉 Escala Dragão")
+    st.caption("Filtros e período da escala")
     inicio = st.date_input("Início", value=date.today().replace(day=1), format="DD/MM/YYYY")
     qtd = st.selectbox("Quantidade de dias", [7, 14, 21, 28, 31], index=3)
     filtro = st.selectbox("Subunidade", ["Todas"] + SU)
@@ -104,14 +130,15 @@ indice = {(int(r.militar_id), r.dia): (r.valor, bool(r.manual))
           for r in servicos.itertuples()}
 datas = [inicio + timedelta(days=n) for n in range(qtd)]
 
-quadro, automatico, cadastro = st.tabs(["📅 Quadro", "⚙️ Geração automática", "👤 Cadastro"])
+quadro, automatico, cadastro = st.tabs(["📋 Quadro de serviço", "⚙️ Escala automática", "👥 Efetivo"])
 with quadro:
     a, b, c = st.columns(3)
     a.metric("Militares", len(ps))
     b.metric("Serviços no período", int((servicos.valor == "SV").sum()) if not servicos.empty else 0)
     c.metric("Células manuais", int(servicos.manual.sum()) if not servicos.empty else 0)
+    st.markdown('<div class="legend">🔴 Vermelha: sábado e domingo &nbsp;&nbsp; ⚫ Preta: segunda a sexta &nbsp;&nbsp; ✏️ Alterações manuais preservadas</div>', unsafe_allow_html=True)
     if ps.empty:
-        st.info("Nenhum militar cadastrado nesta seleção.")
+        st.info("Nenhum militar cadastrado nesta seleção. Acesse a aba Efetivo para começar.")
     else:
         rotulos = [f"{d:%d/%m} {DIAS[d.weekday()]} {'🔴' if categoria(d)=='VERMELHA' else '⚫'}" for d in datas]
         linhas = []
@@ -148,7 +175,7 @@ with quadro:
                            file_name=f"escala_{inicio.isoformat()}.csv", mime="text/csv")
 
 with automatico:
-    st.subheader("Gerar serviços")
+    st.subheader("⚙️ Gerador de escala")
     recalcular = st.checkbox("Recalcular somente serviços automáticos", value=True)
     st.write("Edições manuais ficam preservadas. Um militar é designado por dia, privilegiando menor número de serviços.")
     if st.button("Gerar escala", type="primary"):
@@ -161,7 +188,7 @@ with automatico:
     st.info("A lógica ainda não considera descanso mínimo, feriados, antiguidade ou regras oficiais. Revise antes de utilizar.")
 
 with cadastro:
-    st.subheader("Adicionar militar fictício")
+    st.subheader("👤 Cadastrar militar fictício")
     with st.form("cadastrar"):
         ordem = st.number_input("Ordem", min_value=1, step=1)
         nome = st.text_input("Nome")
