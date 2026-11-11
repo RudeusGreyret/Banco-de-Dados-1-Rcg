@@ -26,3 +26,13 @@ O aplicativo cria automaticamente um banco SQLite local `escala_local.db`, ignor
 - Prioriza menor contagem de serviços já registrados
 - Alterações manuais não são substituídas automaticamente
 - Não é uma escala oficial; requer revisão e validação humana
+
+
+## Login administrativo (Render)
+Configure em **Render → Web Service → Environment**:
+- `SISBOL_ADMIN_USER`: identificador do administrador
+- `SISBOL_ADMIN_PASSWORD`: senha única forte de pelo menos 12 caracteres
+
+O aplicativo **bloqueia o acesso** se as variáveis não estiverem configuradas. Nunca salve credenciais no repositório. Após salvar as variáveis, atualize a implantação do serviço.
+
+**Limitações atuais:** o login é de administrador único e não possui usuários por SU, persistência de sessão entre reinícios, bloqueio global de tentativas nem trilha de auditoria. O limitador de tentativas é apenas por sessão do navegador e não substitui uma solução de autenticação corporativa. O banco SQLite local do Render gratuito é efêmero; não use esta implantação para dados reais ou escala operacional. Para produção, use autenticação centralizada, HTTPS, autorização de cada operação no backend, armazenamento persistente e auditoria.
