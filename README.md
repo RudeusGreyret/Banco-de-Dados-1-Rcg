@@ -1,38 +1,25 @@
-# Escala Dragão — Escalas do 1º RCG
+# Escala Dragão — 1º RCG
 
-Protótipo de escala de serviço em Python e Streamlit.
+Aplicativo Streamlit com escala automática, edição manual e cadastro de efetivo.
 
-## Recursos
-- Quadro de serviço com datas, nomes e categorias PRETA e VERMELHA
-- Geração automática simplificada, com uma vaga por dia
-- Edição manual de SV, IMP e ausência de serviço
-- Preservação das alterações manuais na regeneração
-- Cadastro de militares e exportação CSV
+## Implantação segura
 
-## Executar localmente
+Esta mudança está inicialmente na branch `preparar-banco-persistente`. **Não publique antes de configurar um banco PostgreSQL persistente e testar a conexão.**
 
-```bash
-python -m pip install -r requirements.txt
-python -m streamlit run app.py
-```
+1. Crie um PostgreSQL gerenciado (por exemplo, Supabase).
+2. No Render → Environment, configure `DATABASE_URL` com a string de conexão PostgreSQL, mantendo-a **secreta**.
+3. Confira `SISBOL_ADMIN_USER` e `SISBOL_ADMIN_PASSWORD` já configurados.
+4. Atualize o ambiente de testes primeiro, com nomes fictícios.
+5. Somente após validar, atualize o serviço principal.
 
-O aplicativo cria automaticamente um banco SQLite local `escala_local.db`, ignorado pelo Git.
+A aplicação **não inicia no Render sem DATABASE_URL** para impedir novos cadastros no SQLite temporário. Localmente, o SQLite continua disponível para testes.
 
-**Segurança:** protótipo sem login, controle de acesso por SU, auditoria ou regras oficiais completas de descanso e revezamento. Use apenas dados fictícios durante os testes. Não disponibilize o serviço na internet nem coloque dados operacionais ou nominais no GitHub.
+## Cópias de segurança
 
-## Regras atuais
-- Segunda a sexta: PRETA; sábado e domingo: VERMELHA
-- Só militares ATIVO e habilitados à categoria são considerados
-- Prioriza menor contagem de serviços já registrados
-- Alterações manuais não são substituídas automaticamente
-- Não é uma escala oficial; requer revisão e validação humana
+Na aba Escala automática, exporte separadamente `backup_militares.csv` e `backup_escala.csv`. Guarde em local seguro. Esse backup manual é complementar às rotinas de backup gerenciadas do PostgreSQL.
 
+## Limitações
 
-## Login administrativo (Render)
-Configure em **Render → Web Service → Environment**:
-- `SISBOL_ADMIN_USER`: identificador do administrador
-- `SISBOL_ADMIN_PASSWORD`: senha única forte de pelo menos 12 caracteres
-
-O aplicativo **bloqueia o acesso** se as variáveis não estiverem configuradas. Nunca salve credenciais no repositório. Após salvar as variáveis, atualize a implantação do serviço.
-
-**Limitações atuais:** o login é de administrador único e não possui usuários por SU, persistência de sessão entre reinícios, bloqueio global de tentativas nem trilha de auditoria. O limitador de tentativas é apenas por sessão do navegador e não substitui uma solução de autenticação corporativa. O banco SQLite local do Render gratuito é efêmero; não use esta implantação para dados reais ou escala operacional. Para produção, use autenticação centralizada, HTTPS, autorização de cada operação no backend, armazenamento persistente e auditoria.
+- A migração não recupera automaticamente arquivos SQLite perdidos de instâncias antigas.
+- O login é de administrador único; não há ainda autorização por SU, auditoria ou regras operacionais completas.
+- Não use cadastros nominais ou escalas reais até validar segurança, hospedagem, backups, controle de acesso e conformidade institucional.
