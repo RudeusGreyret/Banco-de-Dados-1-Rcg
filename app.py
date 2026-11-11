@@ -13,16 +13,16 @@ DB = Path(__file__).with_name("escala_local.db")
 SU = ["EM", "1º Esqd", "2º Esqd", "3º Esqd", "Esqd Crm", "Esqd C Ap", "CHDI", "Fanfarra"]
 DIAS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
 
-from database import conectar_postgres
+from google_sheets_store import conectar_google_sheets, GoogleSheetsError
 
 @st.cache_resource
 def conectar():
-    return conectar_postgres()
+    return conectar_google_sheets()
 
 try:
     db = conectar()
 except Exception:
-    st.error("Banco de dados persistente indisponível. Verifique DATABASE_URL no Render. Nenhum cadastro será gravado localmente.")
+    st.error("Planilha Google indisponível. Configure GOOGLE_APPS_SCRIPT_URL e GOOGLE_SHEETS_TOKEN no Render. Nenhum cadastro será gravado localmente.")
     st.stop()
 
 
@@ -189,7 +189,7 @@ st.markdown("""<div class="brand">
 <div class="name">🐉 Escala Dragão</div>
 <div class="sub">Painel de escalas · Geração automática e ajustes manuais</div>
 </div>""", unsafe_allow_html=True)
-st.info("Ambiente de testes com login administrativo. Utilize somente dados fictícios: controle por SU, auditoria e armazenamento persistente ainda não estão implementados.", icon="🔐")
+st.info("Ambiente de testes com login administrativo e armazenamento Google Sheets. Use apenas dados fictícios até validar acesso por SU, auditoria, backups e autorização institucional.", icon="🔐")
 
 with st.sidebar:
     st.header("🐉 Escala Dragão")
@@ -448,7 +448,7 @@ with previsao_tab:
         st.success(f"{total} alteração(ões) na previsão salvas.")
         if total:
             st.rerun()
-    st.warning("O armazenamento do Render gratuito ainda é temporário. Não use dados reais até configurarmos persistência e backups.")
+    st.warning("A planilha guarda o estado entre deploys, mas ainda precisamos validar backups e autorização institucional antes de usar dados reais.")
 
 
 with automatico:
@@ -498,7 +498,6 @@ with cadastro:
                     else:
                         try:
                             db.execute("BEGIN IMMEDIATE")
-                            db.execute("LOCK TABLE militares IN EXCLUSIVE MODE")
                             ordem_gerada = int(db.execute(
                                 "SELECT COALESCE(MAX(ord), 0) + 1 FROM militares"
                             ).fetchone()[0])
