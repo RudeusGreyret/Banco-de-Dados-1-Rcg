@@ -212,21 +212,89 @@ with automatico:
     st.info("A lógica ainda não considera descanso mínimo, feriados, antiguidade ou regras oficiais. Revise antes de utilizar.")
 
 with cadastro:
-    st.subheader("👤 Cadastrar militar fictício")
-    with st.form("cadastrar"):
-        ordem = st.number_input("Ordem", min_value=1, step=1)
-        nome = st.text_input("Nome")
-        su = st.selectbox("SU", SU)
-        status = st.selectbox("Status", ["ATIVO", "FÉRIAS", "BAIXADO", "CURSO", "OUTRO"])
-        obs = st.text_input("Observações")
-        tipo = st.selectbox("Tipo de escala", ["AMBAS", "PRETA", "VERMELHA", "FORA"])
-        if st.form_submit_button("Cadastrar", type="primary"):
-            if not nome.strip():
-                st.error("Informe o nome.")
-            else:
-                with db:
-                    db.execute("INSERT INTO militares(ord,nome,su,status,obs,tipo) VALUES (?,?,?,?,?,?)",
-                               (int(ordem), nome.strip(), su, status, obs, tipo))
-                st.success("Cadastro concluído.")
-                st.rerun()
-    st.dataframe(ps_all, hide_index=True, use_container_width=True)
+    topo, acao = st.columns([4, 1], vertical_alignment="center")
+    with topo:
+        st.subheader("👥 Efetivo cadastrado")
+        st.caption("Clique em um militar na tabela para abrir a ficha de edição à direita.")
+    with acao:
+        with st.popover("➕ Adicionar militar", use_container_width=True):
+            st.markdown("#### Novo cadastro")
+            with st.form("cadastrar", clear_on_submit=True):
+                ordem = st.number_input("Ordem", min_value=1, step=1)
+                nome = st.text_input("Nome")
+                su = st.selectbox("SU", SU)
+                status = st.selectbox("Status", ["ATIVO", "FÉRIAS", "BAIXADO", "CURSO", "OUTRO"])
+                obs = st.text_input("Observações")
+                tipo = st.selectbox("Tipo de escala", ["AMBAS", "PRETA", "VERMELHA", "FORA"])
+                if st.form_submit_button("✅ Cadastrar", type="primary", use_container_width=True):
+                    if not nome.strip():
+                        st.error("Informe o nome.")
+                    else:
+                        with db:
+                            db.execute(
+                                "INSERT INTO militares(ord,nome,su,status,obs,tipo) VALUES (?,?,?,?,?,?)",
+                                (int(ordem), nome.strip(), su, status, obs, tipo))
+                            )
+                        st.success("Militar cadastrado.")
+                        st.rerun()
+
+    lista, ficha = st.columns([3, 2], gap="large")
+    with lista:
+        if ps_all.empty:
+            st.info("Nenhum militar cadastrado. Clique em + Adicionar militar.")
+        else:
+            visivel = ps_all.rename(columns={
+                "ord": "Ord", "nome": "Nome", "su": "SU",
+                "status": "Status", "obs": "Observações", "tipo": "Escala"
+            })
+            resultado = st.dataframe(
+                visivel[["Ord", "Nome", "SU", "Status", "Escala", "Observações"]],
+                use_container_width=True,
+                hide_index=True,
+                height=510,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="selecao_efetivo"
+            )
+            selecionadas = resultado.selection.rows
+            if selecionadas:
+                st.session_state["militar_selecionado"] = int(ps_all.iloc[selecionadas[0]]["id"])
+            elif "militar_selecionado" not in st.session_state:
+                st.caption("Selecione uma linha para editar.")
+    with ficha:
+        selecionado_id = st.session_state.get("militar_selecionado")
+        registro = ps_all[ps_all.id == selecionado_id] if selecionado_id is not None else ps_all.iloc[0:0]
+        if registro.empty:
+            st.info("📋 Selecione um militar na lista à esquerda para abrir a ficha aqui.")
+        else:
+            militar = registro.iloc[0]
+            st.markdown(f"### ✏️ Editar militar nº {int(militar['ord'])}")
+            st.caption("As alterações serão aplicadas após clicar em Salvar.")
+            with st.form(f"editar_militar_{int(militar['id'])}"):
+                novo_ord = st.number_input("Ordem", min_value=1, step=1, value=int(militar["ord"]))
+                novo_nome = st.text_input("Nome", value=str(militar["nome"]))
+                novo_su = st.selectbox("SU", SU, index=SU.index(str(militar["su"])) if str(militar["su"]) in SU else 0)
+                statuses = ["ATIVO", "FÉRIAS", "BAIXADO", "CURSO", "OUTRO"]
+                status_atual = str(militar["status"])
+                if status_atual not in statuses:
+                    statuses.append(status_atual)
+                novo_status = st.selectbox("Status", statuses, index=statuses.index(status_atual))
+                tipos = ["AMBAS", "PRETA", "VERMELHA", "FORA"]
+                tipo_atual = str(militar["tipo"])
+                if tipo_atual not in tipos:
+                    tipos.append(tipo_atual)
+                novo_tipo = st.selectbox("Tipo de escala", tipos, index=tipos.index(tipo_atual))
+                nova_obs = st.text_area("Observações", value=str(militar["obs"] or ""))
+                salvar = st.form_submit_button("💾 Salvar alterações", type="primary", use_container_width=True)
+                if salvar:
+                    if not novo_nome.strip():
+                        st.error("Informe o nome.")
+                    else:
+                        with db:
+                            db.execute(
+                                "UPDATE militares SET ord=?,nome=?,su=?,status=?,obs=?,tipo=? WHERE id=?",
+                                (int(novo_ord), novo_nome.strip(), novo_su, novo_status,
+                                 nova_obs, novo_tipo, int(militar["id"]))
+                            )
+                        st.success("Informações atualizadas.")
+                        st.rerun()
