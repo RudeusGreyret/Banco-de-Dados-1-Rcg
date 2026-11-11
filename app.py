@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from pathlib import Path
 import base64
+from html import escape
 import sqlite3
 import pandas as pd
 import streamlit as st
@@ -25,6 +26,9 @@ def conectar():
       (dia TEXT NOT NULL, militar_id INTEGER NOT NULL,
        valor TEXT NOT NULL, manual INTEGER NOT NULL DEFAULT 0,
        PRIMARY KEY(dia, militar_id))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS previsao_servico
+        (dia TEXT NOT NULL, funcao TEXT NOT NULL, descricao TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (dia, funcao))""")
     db.commit()
     return db
 
@@ -177,7 +181,23 @@ indice = {(int(r.militar_id), r.dia): (r.valor, bool(r.manual))
           for r in servicos.itertuples()}
 datas = [inicio + timedelta(days=n) for n in range(qtd)]
 
-quadro, automatico, cadastro = st.tabs(["📋 Quadro de serviço", "⚙️ Escala automática", "👥 Efetivo"])
+FUNCOES_PREVISAO = {
+    "OFICIAIS": ["SUP DIA", "OF DIA"],
+    "SARGENTOS": ["ADJUNTO", "CMT GDA", "GDA HFA"],
+    "CABOS": ["GDA", "HFA"],
+    "MOTORISTAS": ["SUP DE DIA", "MOT DIA"],
+    "APOIO": ["BLOCO EXTERNO", "PRONTIDÃO"],
+}
+CORES_PREVISAO = {
+    "OFICIAIS": "#b9dd8a", "SARGENTOS": "#4cdb4c",
+    "CABOS": "#f2cc3c", "MOTORISTAS": "#58d6da",
+    "APOIO": "#4688d6",
+}
+NOMES_DIAS = ["SEGUNDA-FEIRA", "TERÇA-FEIRA", "QUARTA-FEIRA",
+              "QUINTA-FEIRA", "SEXTA-FEIRA", "SÁBADO", "DOMINGO"]
+quadro, previsao_tab, automatico, cadastro = st.tabs(
+    ["📋 Quadro de serviço", "🗓️ Previsão da escala", "⚙️ Escala automática", "👥 Efetivo"]
+)
 with quadro:
     a, b, c = st.columns(3)
     a.metric("Militares", len(ps))
@@ -220,6 +240,79 @@ with quadro:
         csv = original.drop(columns=["ID"]).to_csv(index=False, sep=";").encode("utf-8-sig")
         st.download_button("⬇️ Exportar CSV", csv,
                            file_name=f"escala_{inicio.isoformat()}.csv", mime="text/csv")
+
+with previsao_tab:
+    st.subheader("🗓️ PREVISÃO DA ESCALA — 1º RCG")
+    st.caption("Funções nas linhas e datas nas colunas, conforme o modelo enviado.")
+    st.info("Previsão manual, independente do quadro de serviço. A geração automática por função depende de regras próprias.", icon="ℹ️")
+    linhas = [(grupo, funcao, f"{grupo}::{funcao}")
+              for grupo, funcoes in FUNCOES_PREVISAO.items() for funcao in funcoes]
+    encontrados = db.execute(
+        "SELECT dia, funcao, descricao FROM previsao_servico WHERE dia BETWEEN ? AND ?",
+        (inicio.isoformat(), fim.isoformat())
+    ).fetchall()
+    valores = {(dia, funcao): descricao for dia, funcao, descricao in encontrados}
+    tabela_html = ['<div style="overflow-x:auto;width:100%;border-radius:12px;border:1px solid #52627b">']
+    tabela_html.append('<table style="border-collapse:collapse;min-width:1100px;width:max-content;text-align:center;font-size:13px">')
+    tabela_html.append('<thead><tr><th colspan="2" style="background:#111827;color:#fff;min-width:265px;padding:14px">1º RCG<br>DRAGÕES DA INDEPENDÊNCIA</th>')
+    for d in datas:
+        fundo = "#c63229" if d.weekday() >= 5 else "#a9dd85"
+        cor = "#ffe6a0" if d.weekday() >= 5 else "#15371d"
+        tabela_html.append(f'<th style="background:{fundo};color:{cor};min-width:190px;padding:10px;border:1px solid #566276">{d:%d/%m/%Y}<br>{NOMES_DIAS[d.weekday()]}</th>')
+    tabela_html.append("</tr></thead><tbody>")
+    for grupo, funcoes in FUNCOES_PREVISAO.items():
+        for pos, funcao in enumerate(funcoes):
+            tabela_html.append("<tr>")
+            if pos == 0:
+                tabela_html.append(f'<th rowspan="{len(funcoes)}" style="background:{CORES_PREVISAO[grupo]};color:#13252a;border:1px solid #52627b;padding:12px">{escape(grupo)}</th>')
+            tabela_html.append(f'<th style="background:{CORES_PREVISAO[grupo]};color:#13252a;border:1px solid #52627b;padding:12px;min-width:140px">{escape(funcao)}</th>')
+            chave = f"{grupo}::{funcao}"
+            for d in datas:
+                fundo = "#bc3029" if d.weekday() >= 5 else "#f1f4fa"
+                cor = "#ffe9ad" if d.weekday() >= 5 else "#19283a"
+                valor = escape(valores.get((d.isoformat(), chave), "")).replace("\n", "<br>") or "—"
+                tabela_html.append(f'<td style="background:{fundo};color:{cor};border:1px solid #52627b;max-width:220px;overflow-wrap:anywhere;padding:12px;height:56px">{valor}</td>')
+            tabela_html.append("</tr>")
+    tabela_html.append("</tbody></table></div>")
+    st.markdown("".join(tabela_html), unsafe_allow_html=True)
+    st.markdown("#### ✏️ Preencher e corrigir a previsão")
+    rotulos_prev = [d.strftime("%d/%m/%Y") for d in datas]
+    dados_prev = []
+    for grupo, funcao, chave in linhas:
+        row = {"Grupo": grupo, "Função": funcao}
+        for d, titulo in zip(datas, rotulos_prev):
+            row[titulo] = valores.get((d.isoformat(), chave), "")
+        dados_prev.append(row)
+    original_prev = pd.DataFrame(dados_prev)
+    editado_prev = st.data_editor(
+        original_prev, hide_index=True, use_container_width=True, height=490,
+        disabled=["Grupo", "Função"],
+        column_config={titulo: st.column_config.TextColumn(titulo, width="medium") for titulo in rotulos_prev},
+        key=f"previsao_editor_{inicio.isoformat()}_{qtd}"
+    )
+    if st.button("💾 Salvar previsão", type="primary", key="salvar_previsao"):
+        total = 0
+        with db:
+            for idx, (_, _, chave) in enumerate(linhas):
+                for d, titulo in zip(datas, rotulos_prev):
+                    novo = str(editado_prev.iloc[idx][titulo] or "").strip()
+                    antigo = str(original_prev.iloc[idx][titulo] or "").strip()
+                    if novo == antigo:
+                        continue
+                    if novo:
+                        db.execute(
+                            "INSERT OR REPLACE INTO previsao_servico(dia,funcao,descricao) VALUES (?,?,?)",
+                            (d.isoformat(), chave, novo)
+                        )
+                    else:
+                        db.execute("DELETE FROM previsao_servico WHERE dia=? AND funcao=?",
+                                   (d.isoformat(), chave))
+                    total += 1
+        st.success(f"{total} alteração(ões) na previsão salvas.")
+        if total:
+            st.rerun()
+    st.warning("O armazenamento do Render gratuito ainda é temporário. Não use dados reais até configurarmos persistência e backups.")
+
 
 with automatico:
     st.subheader("⚙️ Gerador de escala")
