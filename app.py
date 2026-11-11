@@ -27,7 +27,7 @@ except Exception:
 
 def consulta_dataframe(sql, params=None):
     cursor = db.execute(sql, params)
-    return pd.DataFrame(cursor.fetchall(), columns=[item.name for item in cursor.description])
+    return pd.DataFrame(cursor.fetchall(), columns=[item[0] for item in cursor.description])
 
 
 def pessoas():
