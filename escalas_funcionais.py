@@ -165,8 +165,23 @@ def exibir_escala(db, servico, inicio, qtd, pessoas, lotacoes, categoria):
         "Nome": st.column_config.TextColumn("Nome", pinned=True, width="medium"),
         "SU": st.column_config.TextColumn("SU", pinned=True, width="small"),
     }
-    st.dataframe(df, hide_index=True, use_container_width=True, height=520,
-                 column_config=colunas)
+    def cor_por_coluna(col):
+        if col.name in ("Ord", "Nome", "SU"):
+            return ["background-color:#1d405e;color:white"] * len(col)
+        dias = {f"{d:%d/%m} {['SEG','TER','QUA','QUI','SEX','SÁB','DOM'][d.weekday()]}": d for d in datas}
+        if col.name not in dias:
+            return [""] * len(col)
+        cor_base = "#ab2c2e" if categoria(dias[col.name]) == "VERMELHA" else "#26374c"
+        return [
+            "background-color:#efc451;color:#192639;font-weight:bold"
+            if str(v) == "0" else f"background-color:{cor_base};color:white"
+            for v in col
+        ]
+    st.dataframe(
+        df.style.apply(cor_por_coluna, axis=0),
+        hide_index=True, use_container_width=True, height=520,
+        column_config=colunas
+    )
     st.download_button(
         "⬇️ Exportar quadro CSV",
         df.to_csv(index=False, sep=";").encode("utf-8-sig"),
