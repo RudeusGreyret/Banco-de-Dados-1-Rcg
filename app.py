@@ -282,6 +282,7 @@ def alterar_lotacao(militar_id, destino):
 OPCOES_ESCALAS = [
     "🗓️ Previsão da Escala",
     "👥 Militares por Escala",
+    "🔄 Efetivo online — AG",
     "🎖️ Oficial de Dia",
     "📋 Adjunto de Dia",
     "🛡️ Comandante da Guarda",
@@ -301,6 +302,58 @@ with st.sidebar:
     qtd = st.selectbox("Quantidade de dias", [7, 14, 21, 28, 31], index=3)
     filtro = st.selectbox("Subunidade", ["Todas"] + SU)
     st.caption("PRETA: dias úteis comuns | VERMELHA: fins de semana e feriados nacionais.")
+
+if escala_aberta == "🔄 Efetivo online — AG":
+    st.subheader("🔄 Efetivo online — Planilha AG")
+    st.caption(
+        "Consulta os dados diretamente da planilha AG sempre que esta seção "
+        "é aberta ou atualizada. As alterações feitas na AG aparecem aqui "
+        "sem precisar importar um arquivo Excel."
+    )
+    try:
+        abas_ag = db.carregar_ag()
+    except Exception as exc:
+        st.error(
+            "Não foi possível consultar a AG. Confira AG_SPREADSHEET_ID nas "
+            "propriedades do Apps Script, acesso da conta à planilha e "
+            "a implantação da nova versão do script."
+        )
+        st.caption(str(exc))
+    else:
+        nomes_abas = [aba.get("nome", f"Aba {i+1}") for i, aba in enumerate(abas_ag)]
+        if not nomes_abas:
+            st.info("A planilha AG não possui abas disponíveis.")
+        else:
+            aba_nome = st.selectbox(
+                "Aba de origem da AG", nomes_abas, key="aba_origem_ag"
+            )
+            aba = abas_ag[nomes_abas.index(aba_nome)]
+            linhas = aba.get("linhas", [])
+            st.metric("Linhas na aba", int(aba.get("quantidade_linhas", len(linhas))))
+            if linhas:
+                largura = max(len(linha) for linha in linhas)
+                titulos = [f"Coluna {i+1}" for i in range(largura)]
+                valores = [
+                    list(linha) + [""] * (largura - len(linha))
+                    for linha in linhas
+                ]
+                df_ag = pd.DataFrame(valores, columns=titulos)
+                st.dataframe(
+                    df_ag, hide_index=True, use_container_width=True, height=520
+                )
+                st.caption(
+                    "Prévia em tempo real. Nenhum registro é gravado ou excluído "
+                    "do cadastro da Escala Dragão ao consultar a AG."
+                )
+            else:
+                st.info("A aba selecionada está vazia.")
+    st.info(
+        "Próxima etapa: identificar na AG quais colunas são Nome, SU, "
+        "Status e identificador único. Isso permitirá sincronizar alterações "
+        "sem duplicar cadastros nem perder o histórico de serviço."
+    )
+    st.stop()
+
 
 if escala_aberta not in ("🗓️ Previsão da Escala", "👥 Militares por Escala"):
     mapa_navegacao = {
