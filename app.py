@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from pathlib import Path
+import base64
 import sqlite3
 import pandas as pd
 import streamlit as st
@@ -107,6 +108,24 @@ button[data-baseweb="tab"][aria-selected="true"] {background:#23466a;color:#fff;
 .legend {color:#cbd8e8;margin:8px 0 12px;font-size:13px;}
 @media (max-width:700px) {.block-container{padding:1rem .65rem}.brand{padding:18px 15px}}
 </style>""", unsafe_allow_html=True)
+# Foto de fundo opcional; carregada apenas na aplicação após o login.
+foto_fundo = Path(__file__).with_name("fundo.jpg")
+if foto_fundo.is_file():
+    imagem_b64 = base64.b64encode(foto_fundo.read_bytes()).decode("ascii")
+    st.markdown(
+        "<style>"
+        ".stApp {background-image:linear-gradient(rgba(7,19,35,.87),rgba(7,19,35,.92)),"
+        "url('data:image/jpeg;base64," + imagem_b64 + "') !important;"
+        "background-size:cover !important;background-position:center center !important;"
+        "background-attachment:fixed !important;}"
+        "[data-testid='stSidebar'] {background:rgba(9,21,39,.97) !important;}"
+        "[data-testid='stMetric'] {background:rgba(20,37,59,.96) !important;}"
+        "[data-testid='stForm'] {background:rgba(19,36,59,.98) !important;}"
+        "[data-baseweb='tab-list'] {background:rgba(19,35,57,.97) !important;}"
+        "</style>",
+        unsafe_allow_html=True
+    )
+
 st.markdown("""<div class="brand">
 <div class="eyebrow">1º REGIMENTO DE CAVALARIA DE GUARDAS • CONTROLE DE SERVIÇO</div>
 <div class="name">🐉 Escala Dragão</div>
