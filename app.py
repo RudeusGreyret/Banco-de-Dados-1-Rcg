@@ -307,27 +307,70 @@ with quadro:
                 linha[titulo] = indice.get((p.id, d.isoformat()), ("", False))[0]
             linhas.append(linha)
         original = pd.DataFrame(linhas)
-        st.caption("SV = serviço | IMP = impedimento | — = sem serviço. Após editar, clique em Salvar.")
-        alterado = st.data_editor(
-            original, hide_index=True, use_container_width=True, height=520,
-            disabled=["ID", "Ord", "Nome", "SU", "Status", "OBS", "Escala"],
-            column_config={titulo: st.column_config.SelectboxColumn(
-                titulo, options=["", "SV", "IMP", "—"], width="small")
-                for titulo in rotulos},
-            key=f"grade-{inicio}-{qtd}-{filtro}")
-        if st.button("💾 Salvar edições manuais", type="primary"):
-            total = 0
-            with db:
-                for i, row in alterado.iterrows():
-                    for d, titulo in zip(datas, rotulos):
-                        novo = "" if pd.isna(row[titulo]) else str(row[titulo])
-                        if novo != original.at[i, titulo]:
-                            db.execute(
-                                "INSERT OR REPLACE INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,1)",
-                                (d.isoformat(), int(row["ID"]), novo))
-                            total += 1
-            st.success(f"{total} alteração(ões) registrada(s).")
-            st.rerun()
+
+        # Quadro de leitura: dias consecutivos sem serviço são contados como
+        # 1, 2, 3...; no dia de SV o contador zera e recomeça no seguinte.
+        # A consulta ao histórico evita reiniciar a contagem ao trocar o período.
+        ultimo_servico = {
+            int(mid): date.fromisoformat(dia_str)
+            for mid, dia_str in db.execute(
+                """SELECT militar_id, MAX(dia)
+                   FROM escala WHERE valor='SV' AND dia < ?
+                   GROUP BY militar_id""", (inicio.isoformat(),)
+            ).fetchall()
+        }
+        visualizacao = []
+        for p in ps.itertuples():
+            ultima_data = ultimo_servico.get(int(p.id))
+            dias_livres = 0
+            visual = {"Ord": int(p.ord), "Nome": p.nome, "SU": p.su}
+            for d, titulo in zip(datas, rotulos):
+                marcacao = indice.get((int(p.id), d.isoformat()), ("", False))[0]
+                if marcacao == "SV":
+                    visual[titulo] = "SV"
+                    ultima_data = d
+                    dias_livres = 0
+                else:
+                    if ultima_data is not None:
+                        dias_livres = (d - ultima_data).days
+                    else:
+                        # Sem serviço anterior registrado: inicia em 1 no
+                        # primeiro dia visível do intervalo.
+                        dias_livres += 1
+                    visual[titulo] = (
+                        f"{dias_livres} · IMP" if marcacao == "IMP"
+                        else str(dias_livres)
+                    )
+            visualizacao.append(visual)
+        st.markdown("#### 📆 Dias sem serviço")
+        st.caption("SV = serviço de 24h (zera a contagem). Sem SV = 1, 2, 3… a partir do último serviço registrado. IMP continua contado como dia sem serviço.")
+        st.dataframe(
+            pd.DataFrame(visualizacao), hide_index=True,
+            use_container_width=True, height=430
+        )
+        st.caption("Se não existir serviço anterior registrado, a contagem começa em 1 no início do período exibido.")
+        with st.expander("✏️ Editar escala manualmente", expanded=False):
+            st.caption("Altere somente as datas: SV = serviço, IMP = impedimento, — = sem serviço. Clique em Salvar.")
+            alterado = st.data_editor(
+                original, hide_index=True, use_container_width=True, height=520,
+                disabled=["ID", "Ord", "Nome", "SU", "Status", "OBS", "Escala"],
+                column_config={titulo: st.column_config.SelectboxColumn(
+                    titulo, options=["", "SV", "IMP", "—"], width="small")
+                    for titulo in rotulos},
+                key=f"grade-{inicio}-{qtd}-{filtro}")
+            if st.button("💾 Salvar edições manuais", type="primary"):
+                total = 0
+                with db:
+                    for i, row in alterado.iterrows():
+                        for d, titulo in zip(datas, rotulos):
+                            novo = "" if pd.isna(row[titulo]) else str(row[titulo])
+                            if novo != original.at[i, titulo]:
+                                db.execute(
+                                    "INSERT OR REPLACE INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,1)",
+                                    (d.isoformat(), int(row["ID"]), novo))
+                                total += 1
+                st.success(f"{total} alteração(ões) registrada(s).")
+                st.rerun()
         csv = original.drop(columns=["ID"]).to_csv(index=False, sep=";").encode("utf-8-sig")
         st.download_button("⬇️ Exportar CSV", csv,
                            file_name=f"escala_{inicio.isoformat()}.csv", mime="text/csv")
