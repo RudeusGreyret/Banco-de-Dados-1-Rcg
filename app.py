@@ -4,7 +4,7 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="SisBol | Escalas 1º RCG", page_icon="📅", layout="wide")
+st.set_page_config(page_title="Escala Dragão | Escalas 1º RCG", page_icon="📅", layout="wide")
 
 from auth import exigir_login
 exigir_login()
@@ -86,7 +86,7 @@ st.markdown("""<style>
 h1 {color:#162e49}
 [data-testid="stMetric"] {background:white;padding:12px;border:1px solid #e1e8f0;border-radius:10px}
 </style>""", unsafe_allow_html=True)
-st.title("SisBol | Escalas — 1º RCG")
+st.title("Escala Dragão | Escalas — 1º RCG")
 st.warning("PROTÓTIPO SEM LOGIN: use apenas dados fictícios. Não exponha esta aplicação à internet.", icon="🔒")
 
 with st.sidebar:
