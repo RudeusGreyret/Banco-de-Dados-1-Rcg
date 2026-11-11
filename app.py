@@ -237,7 +237,7 @@ OPCOES_ESCALAS = [
     "🎖️ Oficial de Dia",
     "📋 Adjunto de Dia",
     "🛡️ Comandante da Guarda",
-    "🚪 Cabine da Guarda",
+    "🔰 Cabo da Guarda",
     "🚗 Motorista de Dia",
 ]
 with st.sidebar:
