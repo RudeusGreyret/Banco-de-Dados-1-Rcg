@@ -2,7 +2,6 @@ from datetime import date, timedelta
 from pathlib import Path
 import base64
 from html import escape
-import sqlite3
 import pandas as pd
 import streamlit as st
 
@@ -14,74 +13,33 @@ DB = Path(__file__).with_name("escala_local.db")
 SU = ["EM", "1º Esqd", "2º Esqd", "3º Esqd", "Esqd Crm", "Esqd C Ap", "CHDI", "Fanfarra"]
 DIAS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
 
+from database import conectar_postgres
+
 @st.cache_resource
 def conectar():
-    db = sqlite3.connect(DB, timeout=20, check_same_thread=False)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("""CREATE TABLE IF NOT EXISTS militares
-      (id INTEGER PRIMARY KEY, ord INTEGER NOT NULL, nome TEXT NOT NULL,
-       su TEXT NOT NULL, status TEXT NOT NULL, obs TEXT NOT NULL DEFAULT '',
-       tipo TEXT NOT NULL DEFAULT 'AMBAS')""")
-    db.execute("""CREATE TABLE IF NOT EXISTS escala
-      (dia TEXT NOT NULL, militar_id INTEGER NOT NULL,
-       valor TEXT NOT NULL, manual INTEGER NOT NULL DEFAULT 0,
-       PRIMARY KEY(dia, militar_id))""")
-    db.execute("""CREATE TABLE IF NOT EXISTS previsao_servico
-        (dia TEXT NOT NULL, funcao TEXT NOT NULL, descricao TEXT NOT NULL DEFAULT '',
-        PRIMARY KEY (dia, funcao))""")
-    db.execute("""CREATE TABLE IF NOT EXISTS categoria_dia
-        (dia TEXT PRIMARY KEY, tipo TEXT NOT NULL CHECK(tipo IN ('PRETA','VERMELHA')))""")
-    db.commit()
-    return db
+    return conectar_postgres()
 
-db = conectar()
+try:
+    db = conectar()
+except Exception:
+    st.error("Banco de dados persistente indisponível. Verifique DATABASE_URL no Render. Nenhum cadastro será gravado localmente.")
+    st.stop()
+
+
+def consulta_dataframe(sql, params=None):
+    cursor = db.execute(sql, params)
+    return pd.DataFrame(cursor.fetchall(), columns=[item.name for item in cursor.description])
+
 
 def pessoas():
-    return pd.read_sql_query("SELECT * FROM militares ORDER BY ord, id", db)
+    return consulta_dataframe("SELECT * FROM militares ORDER BY ord, id")
+
 
 def escala(inicio, fim):
-    return pd.read_sql_query(
+    return consulta_dataframe(
         "SELECT * FROM escala WHERE dia BETWEEN ? AND ?",
-        db, params=(inicio.isoformat(), fim.isoformat()))
-
-def pascoa(ano):
-    """Computus gregoriano para apuração da Sexta-Feira Santa."""
-    a = ano % 19
-    b, c = divmod(ano, 100)
-    d, e = divmod(b, 4)
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i, k = divmod(c, 4)
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    mes = (h + l - 7 * m + 114) // 31
-    dia = (h + l - 7 * m + 114) % 31 + 1
-    return date(ano, mes, dia)
-
-
-def feriados_nacionais(ano):
-    fixos = {
-        (1, 1): "Confraternização Universal",
-        (4, 21): "Tiradentes",
-        (5, 1): "Dia do Trabalho",
-        (9, 7): "Independência do Brasil",
-        (10, 12): "Nossa Senhora Aparecida",
-        (11, 2): "Finados",
-        (11, 15): "Proclamação da República",
-        (11, 20): "Consciência Negra",
-        (12, 25): "Natal",
-    }
-    feriados = {date(ano, mes, dia): nome for (mes, dia), nome in fixos.items()}
-    feriados[pascoa(ano) - timedelta(days=2)] = "Paixão de Cristo"
-    return feriados
-
-
-def motivo_calendario(d):
-    if d.weekday() >= 5:
-        return "Fim de semana"
-    return feriados_nacionais(d.year).get(d)
-
+        (inicio.isoformat(), fim.isoformat())
+    )
 
 def categoria(d):
     ajuste = db.execute("SELECT tipo FROM categoria_dia WHERE dia=?", (d.isoformat(),)).fetchone()
@@ -169,7 +127,7 @@ def gerar(inicio, qtd, recalcular):
                 )
             )
             db.execute(
-                "INSERT OR REPLACE INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,0)",
+                "INSERT INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,0) ON CONFLICT (dia,militar_id) DO UPDATE SET valor=EXCLUDED.valor, manual=EXCLUDED.manual",
                 (ds, int(escolhido.id), "SV")
             )
             contagens[int(escolhido.id)][tipo_dia] += 1
@@ -366,7 +324,7 @@ with quadro:
                             novo = "" if pd.isna(row[titulo]) else str(row[titulo])
                             if novo != original.at[i, titulo]:
                                 db.execute(
-                                    "INSERT OR REPLACE INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,1)",
+                                    "INSERT INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,1) ON CONFLICT (dia,militar_id) DO UPDATE SET valor=EXCLUDED.valor, manual=EXCLUDED.manual",
                                     (d.isoformat(), int(row["ID"]), novo))
                                 total += 1
                 st.success(f"{total} alteração(ões) registrada(s).")
@@ -415,7 +373,7 @@ with previsao_tab:
                     db.execute("DELETE FROM categoria_dia WHERE dia=?", (d.isoformat(),))
                 else:
                     db.execute(
-                        "INSERT OR REPLACE INTO categoria_dia(dia,tipo) VALUES (?,?)",
+                        "INSERT INTO categoria_dia(dia,tipo) VALUES (?,?) ON CONFLICT (dia) DO UPDATE SET tipo=EXCLUDED.tipo",
                         (d.isoformat(), novo)
                     )
                 alteracoes_datas += 1
@@ -480,7 +438,7 @@ with previsao_tab:
                         continue
                     if novo:
                         db.execute(
-                            "INSERT OR REPLACE INTO previsao_servico(dia,funcao,descricao) VALUES (?,?,?)",
+                            "INSERT INTO previsao_servico(dia,funcao,descricao) VALUES (?,?,?) ON CONFLICT (dia,funcao) DO UPDATE SET descricao=EXCLUDED.descricao",
                             (d.isoformat(), chave, novo)
                         )
                     else:
@@ -540,6 +498,7 @@ with cadastro:
                     else:
                         try:
                             db.execute("BEGIN IMMEDIATE")
+                            db.execute("LOCK TABLE militares IN EXCLUSIVE MODE")
                             ordem_gerada = int(db.execute(
                                 "SELECT COALESCE(MAX(ord), 0) + 1 FROM militares"
                             ).fetchone()[0])
