@@ -530,7 +530,12 @@ with quadro:
         st.caption("SV = serviço de 24h (zera a contagem). Sem SV = 1, 2, 3… a partir do último serviço registrado. IMP continua contado como dia sem serviço.")
         st.dataframe(
             pd.DataFrame(visualizacao), hide_index=True,
-            use_container_width=True, height=430
+            use_container_width=True, height=430,
+            column_config={
+                "Ord": st.column_config.NumberColumn("Ord", pinned=True, width="small"),
+                "Nome": st.column_config.TextColumn("Nome", pinned=True, width="medium"),
+                "SU": st.column_config.TextColumn("SU", pinned=True, width="small"),
+            },
         )
         st.caption("Se não existir serviço anterior registrado, a contagem começa em 1 no início do período exibido.")
         with st.expander("✏️ Editar escala manualmente", expanded=False):
@@ -538,9 +543,14 @@ with quadro:
             alterado = st.data_editor(
                 original, hide_index=True, use_container_width=True, height=520,
                 disabled=["ID", "Ord", "Nome", "SU", "Status", "OBS", "Escala"],
-                column_config={titulo: st.column_config.SelectboxColumn(
-                    titulo, options=["", "SV", "IMP", "—"], width="small")
-                    for titulo in rotulos},
+                column_config={
+                    "Ord": st.column_config.NumberColumn("Ord", pinned=True, disabled=True, width="small"),
+                    "Nome": st.column_config.TextColumn("Nome", pinned=True, disabled=True, width="medium"),
+                    "SU": st.column_config.TextColumn("SU", pinned=True, disabled=True, width="small"),
+                    **{titulo: st.column_config.SelectboxColumn(
+                        titulo, options=["", "SV", "IMP", "—"], width="small"
+                    ) for titulo in rotulos},
+                },
                 key=f"grade-{inicio}-{qtd}-{filtro}")
             if st.button("💾 Salvar edições manuais", type="primary"):
                 total = 0
