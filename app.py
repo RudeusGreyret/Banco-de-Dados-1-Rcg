@@ -232,8 +232,55 @@ st.markdown("""<div class="brand">
 </div>""", unsafe_allow_html=True)
 st.info("Ambiente de testes com login administrativo e armazenamento Google Sheets. Use apenas dados fictícios até validar acesso por SU, auditoria, backups e autorização institucional.", icon="🔐")
 
+ESCALAS_EFETIVO = [
+    "Oficial de Dia",
+    "Adjunto de Dia",
+    "Comandante da Guarda",
+    "Cabo da Guarda",
+    "Motorista de Dia",
+]
+# Atribuições armazenadas em registros reservados da tabela já sincronizada
+# com o Google Sheets. Isso evita migrar o Apps Script ou alterar snapshots.
+# Nenhuma linha de escala histórica é modificada ao transferir militares.
+DIA_LOTACAO = "__LOTACAO__"
+
+
+def lotacoes_atuais():
+    registros = db.execute(
+        "SELECT funcao, descricao FROM previsao_servico WHERE dia=?",
+        (DIA_LOTACAO,)
+    ).fetchall()
+    resultado = {}
+    for chave, escala_alvo in registros:
+        if str(chave).startswith("MILITAR::"):
+            try:
+                resultado[int(str(chave).split("::", 1)[1])] = str(escala_alvo)
+            except ValueError:
+                continue
+    return resultado
+
+
+def alterar_lotacao(militar_id, destino):
+    if destino not in ESCALAS_EFETIVO and destino != "Sem escala":
+        raise ValueError("Escala de destino inválida.")
+    chave = f"MILITAR::{int(militar_id)}"
+    with db:
+        if destino == "Sem escala":
+            db.execute(
+                "DELETE FROM previsao_servico WHERE dia=? AND funcao=?",
+                (DIA_LOTACAO, chave)
+            )
+        else:
+            db.execute(
+                "INSERT INTO previsao_servico(dia,funcao,descricao) VALUES (?,?,?) "
+                "ON CONFLICT(dia,funcao) DO UPDATE SET descricao=EXCLUDED.descricao",
+                (DIA_LOTACAO, chave, destino)
+            )
+
+
 OPCOES_ESCALAS = [
     "🗓️ Previsão da Escala",
+    "👥 Militares por Escala",
     "🎖️ Oficial de Dia",
     "📋 Adjunto de Dia",
     "🛡️ Comandante da Guarda",
@@ -254,13 +301,154 @@ with st.sidebar:
     filtro = st.selectbox("Subunidade", ["Todas"] + SU)
     st.caption("PRETA: dias úteis comuns | VERMELHA: fins de semana e feriados nacionais.")
 
-if escala_aberta != "🗓️ Previsão da Escala":
+if escala_aberta not in ("🗓️ Previsão da Escala", "👥 Militares por Escala"):
     st.markdown(f"### {escala_aberta}")
     st.info("A navegação desta escala está preparada. A distribuição específica de cada função ainda será configurada; os dados existentes não são alterados.")
     st.caption("Volte à Previsão da Escala para consultar o quadro geral, as configurações por dia e o cadastro.")
     st.stop()
 
 ps_all = pessoas()
+
+if escala_aberta == "👥 Militares por Escala":
+    st.subheader("👥 Militares por Escala")
+    st.caption(
+        "Cadastre diretamente na escala desejada ou transfira um militar entre "
+        "escalas sem alterar seu cadastro, número de ordem ou histórico de serviços."
+    )
+    lotacoes = lotacoes_atuais()
+    abas_efetivo = st.tabs(ESCALAS_EFETIVO)
+    for idx, escala_nome in enumerate(ESCALAS_EFETIVO):
+        with abas_efetivo[idx]:
+            alocados = ps_all[
+                ps_all.id.apply(lambda mid: lotacoes.get(int(mid)) == escala_nome)
+            ] if not ps_all.empty else ps_all
+            st.markdown(f"### {escala_nome}")
+            st.metric("Militares nesta escala", len(alocados))
+            if not alocados.empty:
+                st.dataframe(
+                    alocados[["ord", "nome", "su", "status", "tipo", "obs"]].rename(
+                        columns={
+                            "ord": "Ordem", "nome": "Nome", "su": "SU",
+                            "status": "Status", "tipo": "Preta/Vermelha",
+                            "obs": "Observações"
+                        }
+                    ),
+                    hide_index=True, use_container_width=True, height=260
+                )
+            else:
+                st.info("Nenhum militar atribuído a esta escala.")
+
+            with st.expander("➕ Cadastrar novo militar nesta escala"):
+                with st.form(f"novo_por_escala_{idx}", clear_on_submit=True):
+                    st.caption("O número de ordem será gerado automaticamente.")
+                    novo_nome = st.text_input("Nome completo", key=f"nome_escala_{idx}")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        nova_su = st.selectbox("SU", SU, key=f"su_escala_{idx}")
+                        novo_tipo = st.selectbox(
+                            "Escala preta/vermelha",
+                            ["AMBAS", "PRETA", "VERMELHA", "FORA"],
+                            key=f"tipo_escala_{idx}"
+                        )
+                    with c2:
+                        novo_status = st.selectbox(
+                            "Status",
+                            ["ATIVO", "FÉRIAS", "BAIXADO", "CURSO", "OUTRO"],
+                            key=f"status_escala_{idx}"
+                        )
+                        nova_obs = st.text_input(
+                            "Observações", key=f"obs_escala_{idx}"
+                        )
+                    cadastrar = st.form_submit_button(
+                        "✅ Cadastrar nesta escala", type="primary"
+                    )
+                if cadastrar:
+                    if not novo_nome.strip():
+                        st.error("Informe o nome do militar.")
+                    else:
+                        try:
+                            db.execute("BEGIN IMMEDIATE")
+                            ordem_nova = int(db.execute(
+                                "SELECT COALESCE(MAX(ord),0)+1 FROM militares"
+                            ).fetchone()[0])
+                            cursor = db.execute(
+                                "INSERT INTO militares(ord,nome,su,status,obs,tipo) "
+                                "VALUES (?,?,?,?,?,?)",
+                                (ordem_nova, novo_nome.strip(), nova_su,
+                                 novo_status, nova_obs, novo_tipo)
+                            )
+                            novo_id = int(cursor.lastrowid)
+                            db.execute(
+                                "INSERT INTO previsao_servico(dia,funcao,descricao) "
+                                "VALUES (?,?,?)",
+                                (DIA_LOTACAO, f"MILITAR::{novo_id}", escala_nome)
+                            )
+                            db.commit()
+                        except Exception as exc:
+                            db.rollback()
+                            st.error(f"Cadastro não foi salvo: {exc}")
+                        else:
+                            st.success(f"Militar nº {ordem_nova} cadastrado em {escala_nome}.")
+                            st.rerun()
+
+            st.markdown("#### 🔁 Transferir ou incluir militar existente")
+            if ps_all.empty:
+                st.caption("Cadastre um militar para habilitar a transferência.")
+            else:
+                opcoes_ids = [int(mid) for mid in ps_all.id.tolist()]
+                nome_por_id = {
+                    int(p.id): f"{int(p.ord):03d} · {p.nome} "
+                    f"({lotacoes.get(int(p.id), 'Sem escala')})"
+                    for p in ps_all.itertuples()
+                }
+                with st.form(f"transferir_escala_{idx}"):
+                    transferir_id = st.selectbox(
+                        "Militar",
+                        options=opcoes_ids,
+                        format_func=lambda mid: nome_por_id[mid],
+                        key=f"transferir_id_{idx}"
+                    )
+                    destino = st.selectbox(
+                        "Escala de destino",
+                        options=ESCALAS_EFETIVO + ["Sem escala"],
+                        index=idx,
+                        key=f"destino_escala_{idx}"
+                    )
+                    origem = lotacoes.get(int(transferir_id), "Sem escala")
+                    st.caption(
+                        f"A lotação atual será substituída pela nova escala. "
+                        "A escala de serviços já cumpridos não será apagada."
+                    )
+                    transferir = st.form_submit_button(
+                        "🔁 Confirmar transferência", type="primary"
+                    )
+                if transferir:
+                    if origem == destino:
+                        st.info("O militar já pertence a essa escala.")
+                    else:
+                        try:
+                            alterar_lotacao(int(transferir_id), destino)
+                        except Exception as exc:
+                            st.error(f"Transferência não foi salva: {exc}")
+                        else:
+                            st.success(
+                                f"Militar transferido de {origem} para {destino}."
+                            )
+                            st.rerun()
+    st.divider()
+    sem_lotacao = ps_all[
+        ps_all.id.apply(lambda mid: int(mid) not in lotacoes)
+    ] if not ps_all.empty else ps_all
+    st.caption(
+        f"Militares já existentes sem escala específica: {len(sem_lotacao)}. "
+        "Use a transferência para atribuí-los sem duplicar o cadastro."
+    )
+    st.warning(
+        "Esta tela organiza os efetivos por escala. A geração automática por "
+        "função ainda não usa essas lotações; será integrada posteriormente."
+    )
+    st.stop()
+
 ps = ps_all if filtro == "Todas" else ps_all[ps_all.su == filtro]
 fim = inicio + timedelta(days=qtd - 1)
 servicos = escala(inicio, fim)
@@ -693,6 +881,10 @@ with cadastro:
                     try:
                         db.execute("BEGIN IMMEDIATE")
                         db.execute("DELETE FROM escala WHERE militar_id = ?", (mid,))
+                        db.execute(
+                            "DELETE FROM previsao_servico WHERE dia=? AND funcao=?",
+                            (DIA_LOTACAO, f"MILITAR::{mid}")
+                        )
                         cursor = db.execute("DELETE FROM militares WHERE id = ?", (mid,))
                         if cursor.rowcount != 1:
                             raise ValueError("O cadastro não foi encontrado. Atualize a página.")
