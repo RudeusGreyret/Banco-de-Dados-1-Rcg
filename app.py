@@ -307,3 +307,35 @@ with cadastro:
                             )
                         st.success("Informações atualizadas.")
                         st.rerun()
+
+            st.divider()
+            with st.popover("🗑️ Excluir militar", use_container_width=True):
+                st.error("Esta exclusão é permanente.")
+                st.write(f"Militar: **{militar['nome']}** — ordem {int(militar['ord'])}.")
+                st.caption("As marcações de serviço e impedimento deste militar também serão apagadas.")
+                confirmar = st.checkbox(
+                    "Confirmo que desejo excluir este militar e seus registros de escala",
+                    key=f"confirmar_exclusao_{int(militar['id'])}"
+                )
+                if st.button(
+                    "Excluir definitivamente",
+                    type="primary",
+                    disabled=not confirmar,
+                    use_container_width=True,
+                    key=f"botao_excluir_{int(militar['id'])}"
+                ):
+                    mid = int(militar["id"])
+                    try:
+                        db.execute("BEGIN IMMEDIATE")
+                        db.execute("DELETE FROM escala WHERE militar_id = ?", (mid,))
+                        cursor = db.execute("DELETE FROM militares WHERE id = ?", (mid,))
+                        if cursor.rowcount != 1:
+                            raise ValueError("O cadastro não foi encontrado. Atualize a página.")
+                        db.commit()
+                    except Exception as exc:
+                        db.rollback()
+                        st.error(f"Não foi possível excluir o militar: {exc}")
+                    else:
+                        st.session_state.pop("militar_selecionado", None)
+                        st.toast("Militar e registros de escala excluídos.", icon="✅")
+                        st.rerun()
