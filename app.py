@@ -1,7 +1,8 @@
 from datetime import date, timedelta
 from pathlib import Path
 import base64
-import sqlite3
+import os
+from storage import Store
 import pandas as pd
 import streamlit as st
 
@@ -15,28 +16,26 @@ DIAS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
 
 @st.cache_resource
 def conectar():
-    db = sqlite3.connect(DB, timeout=20, check_same_thread=False)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("""CREATE TABLE IF NOT EXISTS militares
-      (id INTEGER PRIMARY KEY, ord INTEGER NOT NULL, nome TEXT NOT NULL,
-       su TEXT NOT NULL, status TEXT NOT NULL, obs TEXT NOT NULL DEFAULT '',
-       tipo TEXT NOT NULL DEFAULT 'AMBAS')""")
-    db.execute("""CREATE TABLE IF NOT EXISTS escala
-      (dia TEXT NOT NULL, militar_id INTEGER NOT NULL,
-       valor TEXT NOT NULL, manual INTEGER NOT NULL DEFAULT 0,
-       PRIMARY KEY(dia, militar_id))""")
-    db.commit()
-    return db
+    banco = Store(DB)
+    banco.init_schema()
+    return banco
 
-db = conectar()
+if os.environ.get("RENDER") and not os.environ.get("DATABASE_URL"):
+    st.error("Proteção contra perda de dados: configure DATABASE_URL com PostgreSQL persistente antes de usar o sistema.")
+    st.stop()
+
+try:
+    db = conectar()
+except Exception:
+    st.error("Não foi possível conectar ao banco persistente. Verifique DATABASE_URL no Render. Nenhum cadastro foi alterado.")
+    st.stop()
 
 def pessoas():
-    return pd.read_sql_query("SELECT * FROM militares ORDER BY ord, id", db)
+    return db.frame("SELECT * FROM militares ORDER BY ord, id")
 
 def escala(inicio, fim):
-    return pd.read_sql_query(
-        "SELECT * FROM escala WHERE dia BETWEEN ? AND ?",
-        db, params=(inicio.isoformat(), fim.isoformat()))
+    return db.frame("SELECT * FROM escala WHERE dia BETWEEN ? AND ?",
+                    (inicio.isoformat(), fim.isoformat()))
 
 def categoria(d):
     return "VERMELHA" if d.weekday() >= 5 else "PRETA"
@@ -48,7 +47,7 @@ def gerar(inicio, qtd, recalcular):
     contagem = dict(db.execute(
         "SELECT militar_id, COUNT(*) FROM escala WHERE valor='SV' GROUP BY militar_id").fetchall())
     gerados, avisos = 0, []
-    with db:
+    with db.transaction():
         for n in range(qtd):
             dia = inicio + timedelta(days=n)
             ds = dia.isoformat()
@@ -76,7 +75,7 @@ def gerar(inicio, qtd, recalcular):
             escolhido = min(elegiveis.itertuples(),
                             key=lambda p: (contagem.get(p.id, 0), p.ord, p.id))
             db.execute(
-                "INSERT OR REPLACE INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,0)",
+                "INSERT INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,0) ON CONFLICT(dia,militar_id) DO UPDATE SET valor=excluded.valor,manual=excluded.manual",
                 (ds, int(escolhido.id), "SV"))
             contagem[escolhido.id] = contagem.get(escolhido.id, 0) + 1
             gerados += 1
@@ -183,13 +182,13 @@ with quadro:
             key=f"grade-{inicio}-{qtd}-{filtro}")
         if st.button("💾 Salvar edições manuais", type="primary"):
             total = 0
-            with db:
+            with db.transaction():
                 for i, row in alterado.iterrows():
                     for d, titulo in zip(datas, rotulos):
                         novo = "" if pd.isna(row[titulo]) else str(row[titulo])
                         if novo != original.at[i, titulo]:
                             db.execute(
-                                "INSERT OR REPLACE INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,1)",
+                                "INSERT INTO escala(dia,militar_id,valor,manual) VALUES (?,?,?,1) ON CONFLICT(dia,militar_id) DO UPDATE SET valor=excluded.valor,manual=excluded.manual",
                                 (d.isoformat(), int(row["ID"]), novo))
                             total += 1
             st.success(f"{total} alteração(ões) registrada(s).")
@@ -210,6 +209,15 @@ with automatico:
         if numero:
             st.rerun()
     st.info("A lógica ainda não considera descanso mínimo, feriados, antiguidade ou regras oficiais. Revise antes de utilizar.")
+    st.markdown("#### Backup do banco")
+    st.caption("Faça cópias periódicas dos dois arquivos CSV e mantenha-os em local seguro, fora do GitHub.")
+    st.download_button("⬇️ Backup dos militares (CSV)",
+        pessoas().to_csv(index=False, sep=";").encode("utf-8-sig"),
+        file_name="backup_militares.csv", mime="text/csv")
+    st.download_button("⬇️ Backup das marcações (CSV)",
+        db.frame("SELECT * FROM escala ORDER BY dia,militar_id").to_csv(index=False, sep=";").encode("utf-8-sig"),
+        file_name="backup_escala.csv", mime="text/csv")
+
 
 with cadastro:
     topo, acao = st.columns([3, 1], vertical_alignment="center")
@@ -244,7 +252,7 @@ with cadastro:
                         st.error("Informe o nome.")
                     else:
                         try:
-                            db.execute("BEGIN IMMEDIATE")
+                            db.begin()
                             ordem_gerada = int(db.execute(
                                 "SELECT COALESCE(MAX(ord), 0) + 1 FROM militares"
                             ).fetchone()[0])
@@ -312,7 +320,7 @@ with cadastro:
                     if not novo_nome.strip():
                         st.error("Informe o nome.")
                     else:
-                        with db:
+                        with db.transaction():
                             db.execute(
                                 "UPDATE militares SET nome=?,su=?,status=?,obs=?,tipo=? WHERE id=?",
                                 (novo_nome.strip(), novo_su, novo_status,
@@ -339,7 +347,7 @@ with cadastro:
                 ):
                     mid = int(militar["id"])
                     try:
-                        db.execute("BEGIN IMMEDIATE")
+                        db.begin()
                         db.execute("DELETE FROM escala WHERE militar_id = ?", (mid,))
                         cursor = db.execute("DELETE FROM militares WHERE id = ?", (mid,))
                         if cursor.rowcount != 1:
