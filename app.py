@@ -40,6 +40,48 @@ def escala(inicio, fim):
         (inicio.isoformat(), fim.isoformat())
     )
 
+def pascoa(ano):
+    """Calcula a data da Páscoa no calendário gregoriano."""
+    a = ano % 19
+    b, c = divmod(ano, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mes = (h + l - 7 * m + 114) // 31
+    dia = (h + l - 7 * m + 114) % 31 + 1
+    return date(ano, mes, dia)
+
+
+def feriados_nacionais(ano):
+    fixos = {
+        (1, 1): "Confraternização Universal",
+        (4, 21): "Tiradentes",
+        (5, 1): "Dia do Trabalho",
+        (9, 7): "Independência do Brasil",
+        (10, 12): "Nossa Senhora Aparecida",
+        (11, 2): "Finados",
+        (11, 15): "Proclamação da República",
+        (11, 20): "Consciência Negra",
+        (12, 25): "Natal",
+    }
+    feriados = {
+        date(ano, mes, dia): nome for (mes, dia), nome in fixos.items()
+    }
+    feriados[pascoa(ano) - timedelta(days=2)] = "Paixão de Cristo"
+    return feriados
+
+
+def motivo_calendario(d):
+    """Classifica automaticamente fins de semana e feriados nacionais."""
+    if d.weekday() >= 5:
+        return "Fim de semana"
+    return feriados_nacionais(d.year).get(d)
+
+
 def categoria(d):
     ajuste = db.execute("SELECT tipo FROM categoria_dia WHERE dia=?", (d.isoformat(),)).fetchone()
     if ajuste:
