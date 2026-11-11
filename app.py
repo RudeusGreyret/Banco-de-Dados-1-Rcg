@@ -232,35 +232,32 @@ st.markdown("""<div class="brand">
 </div>""", unsafe_allow_html=True)
 st.info("Ambiente de testes com login administrativo e armazenamento Google Sheets. Use apenas dados fictícios até validar acesso por SU, auditoria, backups e autorização institucional.", icon="🔐")
 
+OPCOES_ESCALAS = [
+    "🗓️ Previsão da Escala",
+    "🎖️ Oficial de Dia",
+    "📋 Adjunto de Dia",
+    "🛡️ Comandante da Guarda",
+    "🚪 Cabine da Guarda",
+    "🚗 Motorista de Dia",
+]
 with st.sidebar:
     st.header("🐉 Escala Dragão")
     st.caption("MENU DE ESCALAS")
-    # As novas escalas são apenas áreas de navegação; ainda não fazem
-    # leitura ou gravação de escala no banco atual.
     escala_aberta = st.radio(
-        "Selecionar escala",
-        ["📅 Escala principal", "🛡️ Escala da Guarda", "🎖️ Oficial de Dia",
-         "🔰 Cabo de Dia", "📋 Sargento de Dia"],
-        label_visibility="collapsed",
-        key="menu_escalas"
+        "Selecionar escala", OPCOES_ESCALAS,
+        label_visibility="collapsed", key="menu_escalas"
     )
     st.divider()
-    if escala_aberta == "📅 Escala principal":
-        st.caption("FILTROS DA ESCALA PRINCIPAL")
-        inicio = st.date_input("Início", value=date.today().replace(day=1), format="DD/MM/YYYY")
-        qtd = st.selectbox("Quantidade de dias", [7, 14, 21, 28, 31], index=3)
-        filtro = st.selectbox("Subunidade", ["Todas"] + SU)
-        st.caption("PRETA: dias úteis comuns | VERMELHA: fins de semana e feriados nacionais. Ajustes extraordinários por data na Previsão.")
-    else:
-        st.caption("Em preparação — sem alterações no banco de dados.")
+    st.caption("PERÍODO")
+    inicio = st.date_input("Início", value=date.today().replace(day=1), format="DD/MM/YYYY")
+    qtd = st.selectbox("Quantidade de dias", [7, 14, 21, 28, 31], index=3)
+    filtro = st.selectbox("Subunidade", ["Todas"] + SU)
+    st.caption("PRETA: dias úteis comuns | VERMELHA: fins de semana e feriados nacionais.")
 
-if escala_aberta != "📅 Escala principal":
+if escala_aberta != "🗓️ Previsão da Escala":
     st.markdown(f"### {escala_aberta}")
-    st.info(
-        "Esta área já está no menu lateral. O cadastro, as regras e as escalas "
-        "específicas serão configurados antes de ativar a geração automática."
-    )
-    st.caption("As escalas existentes e os cadastros não são modificados ao abrir esta seção.")
+    st.info("A navegação desta escala está preparada. A distribuição específica de cada função ainda será configurada; os dados existentes não são alterados.")
+    st.caption("Volte à Previsão da Escala para consultar o quadro geral, as configurações por dia e o cadastro.")
     st.stop()
 
 ps_all = pessoas()
@@ -375,6 +372,67 @@ with quadro:
                            file_name=f"escala_{inicio.isoformat()}.csv", mime="text/csv")
 
 with previsao_tab:
+    st.markdown("#### ⚙️ Quantidade de militares por função e data")
+    st.caption("Padrão: 2 cabos da guarda e 1 motorista de dia. Altere apenas as datas extraordinárias; não modifica os nomes cadastrados.")
+    opcoes_quantidade = []
+    for d in datas:
+        ajustes = dict(db.execute(
+            "SELECT funcao,descricao FROM previsao_servico WHERE dia=? AND funcao IN (?,?)",
+            (d.isoformat(), "__CONFIG__::CABOS_GUARDA", "__CONFIG__::MOTORISTA_DIA")
+        ).fetchall())
+        try:
+            cabos = int(ajustes.get("__CONFIG__::CABOS_GUARDA", "2"))
+            motoristas = int(ajustes.get("__CONFIG__::MOTORISTA_DIA", "1"))
+        except ValueError:
+            cabos, motoristas = 2, 1
+        opcoes_quantidade.append({
+            "Data": d.strftime("%d/%m/%Y"),
+            "Dia": DIAS[d.weekday()],
+            "Cabos da guarda": cabos,
+            "Motoristas de dia": motoristas,
+        })
+    original_quantidade = pd.DataFrame(opcoes_quantidade)
+    editado_quantidade = st.data_editor(
+        original_quantidade, hide_index=True, use_container_width=True,
+        disabled=["Data", "Dia"],
+        column_config={
+            "Cabos da guarda": st.column_config.NumberColumn(
+                "Cabos da guarda", min_value=1, max_value=10, step=1, required=True
+            ),
+            "Motoristas de dia": st.column_config.NumberColumn(
+                "Motoristas de dia", min_value=1, max_value=10, step=1, required=True
+            ),
+        },
+        key=f"quantidades_diarias_{inicio.isoformat()}_{qtd}"
+    )
+    if st.button("💾 Salvar quantidades por data", type="primary", key="salvar_quantidades_diarias"):
+        alteradas = 0
+        with db:
+            for idx, d in enumerate(datas):
+                for titulo, funcao, padrao in [
+                    ("Cabos da guarda", "__CONFIG__::CABOS_GUARDA", 2),
+                    ("Motoristas de dia", "__CONFIG__::MOTORISTA_DIA", 1),
+                ]:
+                    valor = int(editado_quantidade.iloc[idx][titulo])
+                    anterior = int(original_quantidade.iloc[idx][titulo])
+                    if valor == anterior:
+                        continue
+                    if valor == padrao:
+                        db.execute(
+                            "DELETE FROM previsao_servico WHERE dia=? AND funcao=?",
+                            (d.isoformat(), funcao)
+                        )
+                    else:
+                        db.execute(
+                            "INSERT INTO previsao_servico(dia,funcao,descricao) VALUES (?,?,?) "
+                            "ON CONFLICT (dia,funcao) DO UPDATE SET descricao=EXCLUDED.descricao",
+                            (d.isoformat(), funcao, str(valor))
+                        )
+                    alteradas += 1
+        st.success(f"{alteradas} configuração(ões) salva(s).")
+        if alteradas:
+            st.rerun()
+    st.divider()
     st.subheader("🗓️ PREVISÃO DA ESCALA — 1º RCG")
     st.caption("Funções nas linhas e datas nas colunas, conforme o modelo enviado.")
     st.markdown("#### 📆 Tipo de escala por data")
