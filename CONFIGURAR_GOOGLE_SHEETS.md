@@ -54,3 +54,20 @@ Depois, faça **Manual Deploy → Deploy latest commit**. Se o Render estiver co
 - A autenticação do endpoint depende de um segredo no lado servidor. Adicione controle de acesso por usuário/SU e auditoria antes de dados reais.
 - A revisão é salva em uma aba de snapshots codificados, não em tabelas Google Sheets editáveis diretamente.
 - Se o site indicar **CONFLITO**, pare de editar e reinicie o serviço para carregar a revisão mais atual.
+
+## Planilha AG online (consulta contínua)
+
+Para usar a planilha AG como fonte de efetivo, sem fazer downloads repetidos:
+
+1. Abra o projeto Apps Script já ligado ao banco da Escala Dragão.
+2. Substitua o código do editor pelo arquivo atualizado `apps_script_escala.gs` deste repositório.
+3. Nas **Propriedades do script**, adicione:
+   - `AG_SPREADSHEET_ID` = `1B83jYoPQ8FHNq2-gMHLF-CdC5xTWYFJb5bH_ifaiQbo`.
+4. A conta que executa o Apps Script precisa ter permissão de leitura da planilha AG.
+5. Em **Implantar → Gerenciar implantações → Editar**, selecione **Nova versão** e implante.
+6. Publique o app.py atualizado no Render e acesse o item **Efetivo online — AG** no menu lateral.
+7. Selecione uma aba para ver os dados atuais. Para atualizar os valores, recarregue a página.
+
+**Proteção dos dados:** a consulta AG é somente leitura e não modifica o banco da Escala Dragão nem os históricos de serviço. Antes de ativar sincronização automática de cadastros, identifique e confira na AG a coluna de nome, SU, status e um identificador estável. Nunca exclua cadastros/históricos apenas porque uma linha foi removida da AG. Não cole tokens ou senhas neste repositório.
+
+A conexão ao Google Sheets depende de um endpoint Apps Script autenticado, com cotas e limites de tempo/tamanho. Não use informações nominais reais sem autorização institucional e controle de acesso adequado.
