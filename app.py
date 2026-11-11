@@ -212,22 +212,34 @@ with automatico:
     st.info("A lógica ainda não considera descanso mínimo, feriados, antiguidade ou regras oficiais. Revise antes de utilizar.")
 
 with cadastro:
-    topo, acao = st.columns([4, 1], vertical_alignment="center")
+    topo, acao = st.columns([3, 1], vertical_alignment="center")
     with topo:
         st.subheader("👥 Efetivo cadastrado")
-        st.caption("Clique em um militar na tabela para abrir a ficha de edição à direita.")
+        st.caption("Selecione um militar na lista para editar a ficha à direita.")
     with acao:
-        with st.popover("➕ Adicionar militar", use_container_width=True):
-            st.markdown("#### Novo cadastro")
+        if st.button("➕ Adicionar militar" if not st.session_state.get("mostrar_cadastro") else "✕ Fechar cadastro",
+                     use_container_width=True, type="primary"):
+            st.session_state["mostrar_cadastro"] = not st.session_state.get("mostrar_cadastro", False)
+            st.rerun()
+
+    if st.session_state.get("mostrar_cadastro", False):
+        with st.container(border=True):
+            st.markdown("### ➕ Novo cadastro de militar")
+            st.caption("Preencha os campos abaixo. A numeração é atribuída automaticamente.")
             with st.form("cadastrar", clear_on_submit=True):
-                proxima_ordem = int(db.execute("SELECT COALESCE(MAX(ord), 0) + 1 FROM militares").fetchone()[0])
-                st.caption(f"Número de ordem automático: {proxima_ordem}")
-                nome = st.text_input("Nome")
-                su = st.selectbox("SU", SU)
-                status = st.selectbox("Status", ["ATIVO", "FÉRIAS", "BAIXADO", "CURSO", "OUTRO"])
-                obs = st.text_input("Observações")
+                proxima_ordem = int(db.execute(
+                    "SELECT COALESCE(MAX(ord), 0) + 1 FROM militares"
+                ).fetchone()[0])
+                st.text_input("Número de ordem automático", value=str(proxima_ordem), disabled=True)
+                nome = st.text_input("Nome completo")
+                col_su, col_status = st.columns(2)
+                with col_su:
+                    su = st.selectbox("Subunidade (SU)", SU)
+                with col_status:
+                    status = st.selectbox("Status", ["ATIVO", "FÉRIAS", "BAIXADO", "CURSO", "OUTRO"])
                 tipo = st.selectbox("Tipo de escala", ["AMBAS", "PRETA", "VERMELHA", "FORA"])
-                if st.form_submit_button("✅ Cadastrar", type="primary", use_container_width=True):
+                obs = st.text_area("Observações", height=110)
+                if st.form_submit_button("✅ Cadastrar militar", type="primary", use_container_width=True):
                     if not nome.strip():
                         st.error("Informe o nome.")
                     else:
@@ -244,10 +256,11 @@ with cadastro:
                         except Exception:
                             db.rollback()
                             raise
-                        st.success(f"Militar cadastrado com número {ordem_gerada}.")
+                        st.session_state["mostrar_cadastro"] = False
+                        st.toast(f"Militar cadastrado com número {ordem_gerada}.", icon="✅")
                         st.rerun()
 
-    lista, ficha = st.columns([3, 2], gap="large")
+    lista, ficha = st.columns([1, 1.4], gap="large")
     with lista:
         if ps_all.empty:
             st.info("Nenhum militar cadastrado. Clique em + Adicionar militar.")
@@ -278,7 +291,7 @@ with cadastro:
         else:
             militar = registro.iloc[0]
             st.markdown(f"### ✏️ Editar militar nº {int(militar['ord'])}")
-            st.caption("As alterações serão aplicadas após clicar em Salvar.")
+            st.caption("Ficha ampliada: edite os campos e clique em Salvar alterações.")
             with st.form(f"editar_militar_{int(militar['id'])}"):
                 st.text_input("Número de ordem (automático)", value=str(int(militar["ord"])), disabled=True)
                 novo_nome = st.text_input("Nome", value=str(militar["nome"]))
@@ -293,7 +306,7 @@ with cadastro:
                 if tipo_atual not in tipos:
                     tipos.append(tipo_atual)
                 novo_tipo = st.selectbox("Tipo de escala", tipos, index=tipos.index(tipo_atual))
-                nova_obs = st.text_area("Observações", value=str(militar["obs"] or ""))
+                nova_obs = st.text_area("Observações", value=str(militar["obs"] or ""), height=130)
                 salvar = st.form_submit_button("💾 Salvar alterações", type="primary", use_container_width=True)
                 if salvar:
                     if not novo_nome.strip():
