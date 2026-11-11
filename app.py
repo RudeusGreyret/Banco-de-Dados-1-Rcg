@@ -220,7 +220,8 @@ with cadastro:
         with st.popover("➕ Adicionar militar", use_container_width=True):
             st.markdown("#### Novo cadastro")
             with st.form("cadastrar", clear_on_submit=True):
-                ordem = st.number_input("Ordem", min_value=1, step=1)
+                proxima_ordem = int(db.execute("SELECT COALESCE(MAX(ord), 0) + 1 FROM militares").fetchone()[0])
+                st.caption(f"Número de ordem automático: {proxima_ordem}")
                 nome = st.text_input("Nome")
                 su = st.selectbox("SU", SU)
                 status = st.selectbox("Status", ["ATIVO", "FÉRIAS", "BAIXADO", "CURSO", "OUTRO"])
@@ -230,12 +231,20 @@ with cadastro:
                     if not nome.strip():
                         st.error("Informe o nome.")
                     else:
-                        with db:
+                        try:
+                            db.execute("BEGIN IMMEDIATE")
+                            ordem_gerada = int(db.execute(
+                                "SELECT COALESCE(MAX(ord), 0) + 1 FROM militares"
+                            ).fetchone()[0])
                             db.execute(
                                 "INSERT INTO militares(ord,nome,su,status,obs,tipo) VALUES (?,?,?,?,?,?)",
-                                (int(ordem), nome.strip(), su, status, obs, tipo))
+                                (ordem_gerada, nome.strip(), su, status, obs, tipo)
                             )
-                        st.success("Militar cadastrado.")
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                            raise
+                        st.success(f"Militar cadastrado com número {ordem_gerada}.")
                         st.rerun()
 
     lista, ficha = st.columns([3, 2], gap="large")
@@ -271,7 +280,7 @@ with cadastro:
             st.markdown(f"### ✏️ Editar militar nº {int(militar['ord'])}")
             st.caption("As alterações serão aplicadas após clicar em Salvar.")
             with st.form(f"editar_militar_{int(militar['id'])}"):
-                novo_ord = st.number_input("Ordem", min_value=1, step=1, value=int(militar["ord"]))
+                st.text_input("Número de ordem (automático)", value=str(int(militar["ord"])), disabled=True)
                 novo_nome = st.text_input("Nome", value=str(militar["nome"]))
                 novo_su = st.selectbox("SU", SU, index=SU.index(str(militar["su"])) if str(militar["su"]) in SU else 0)
                 statuses = ["ATIVO", "FÉRIAS", "BAIXADO", "CURSO", "OUTRO"]
@@ -292,8 +301,8 @@ with cadastro:
                     else:
                         with db:
                             db.execute(
-                                "UPDATE militares SET ord=?,nome=?,su=?,status=?,obs=?,tipo=? WHERE id=?",
-                                (int(novo_ord), novo_nome.strip(), novo_su, novo_status,
+                                "UPDATE militares SET nome=?,su=?,status=?,obs=?,tipo=? WHERE id=?",
+                                (novo_nome.strip(), novo_su, novo_status,
                                  nova_obs, novo_tipo, int(militar["id"]))
                             )
                         st.success("Informações atualizadas.")
