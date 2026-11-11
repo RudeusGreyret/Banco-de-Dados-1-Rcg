@@ -52,6 +52,15 @@ class GoogleSheetsDatabase:
             raise GoogleSheetsError(f"Google Sheets recusou a operação: {error}")
         return parsed
 
+    def carregar_ag(self):
+        """Lê dados atuais da AG, sem alterar o banco de escalas."""
+        with self.lock:
+            dados = self._request({"action": "ag_load"})
+        abas = dados.get("abas")
+        if not isinstance(abas, list):
+            raise GoogleSheetsError("Resposta da AG sem abas válidas.")
+        return abas
+
     def _create_tables(self):
         self.conn.executescript("""
             CREATE TABLE militares (
