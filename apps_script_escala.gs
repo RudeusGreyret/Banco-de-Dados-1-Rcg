@@ -115,6 +115,35 @@ function salvar_(sheet, request) {
   return {revision: nova};
 }
 
+/**
+ * Consulta SOMENTE LEITURA da planilha AG.
+ * A planilha AG é definida nas Propriedades do Script, não no código.
+ * O usuário que executa o Apps Script precisa ter acesso a essa planilha.
+ * Mantemos a origem isolada da planilha Estado, sem sobrescrever cadastros.
+ */
+function consultarAg_() {
+  const propriedades = PropertiesService.getScriptProperties();
+  const id = propriedades.getProperty("AG_SPREADSHEET_ID");
+  if (!id) throw new Error("AG_SPREADSHEET_ID ausente nas propriedades do script");
+  const ss = SpreadsheetApp.openById(id);
+  const abas = ss.getSheets().map(aba => {
+    const linhas = aba.getLastRow();
+    const colunas = aba.getLastColumn();
+    if (linhas === 0 || colunas === 0) {
+      return {nome: aba.getName(), linhas: [], quantidade_linhas: 0};
+    }
+    if (linhas > 3000 || colunas > 50) {
+      throw new Error("A aba " + aba.getName() + " excede o limite de leitura. Defina um intervalo menor.");
+    }
+    return {
+      nome: aba.getName(),
+      quantidade_linhas: linhas,
+      linhas: aba.getRange(1, 1, linhas, colunas).getDisplayValues()
+    };
+  });
+  return {abas: abas};
+}
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   try {
@@ -128,6 +157,8 @@ function doPost(e) {
     let result;
     if (request.action === "load") {
       result = carregar_(sheet);
+    } else if (request.action === "ag_load") {
+      result = consultarAg_();
     } else if (request.action === "save") {
       result = salvar_(sheet, request);
     } else {
