@@ -14,6 +14,7 @@ DIAS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
 
 from google_sheets_store import conectar_google_sheets, GoogleSheetsError
 from escalas_funcionais import exibir_escala, SERVICOS
+from classificacao_ag import extrair_posto, escalas_possiveis, sugerir_coluna
 
 @st.cache_resource
 def conectar():
@@ -345,6 +346,88 @@ if escala_aberta == "🔄 Efetivo online — AG":
                     "Prévia em tempo real. Nenhum registro é gravado ou excluído "
                     "do cadastro da Escala Dragão ao consultar a AG."
                 )
+                st.markdown("### 🎖️ Separar militares por posto/graduação")
+                st.caption(
+                    "Classificação sugerida: Oficial de Dia (oficiais); "
+                    "Adjunto e Comandante da Guarda (sargentos/subtenentes); "
+                    "Cabo da Guarda (cabos); Motorista de Dia (cabos/soldados "
+                    "com habilitação confirmada). A classificação NÃO cadastra "
+                    "nem coloca ninguém de serviço automaticamente."
+                )
+                header_idx = st.number_input(
+                    "Linha do cabeçalho na AG", min_value=1,
+                    max_value=len(valores), value=1, step=1, key="ag_header"
+                ) - 1
+                cabecalho = valores[int(header_idx)]
+                def rotulo_coluna(i):
+                    titulo = cabecalho[i].strip() if i < len(cabecalho) else ""
+                    return f"{i+1} — {titulo or f'Coluna {i+1}'}"
+                indices = list(range(largura))
+                sug_nome = sugerir_coluna(valores, ["NOME", "MILITAR"], int(header_idx))
+                sug_grad = sugerir_coluna(
+                    valores, ["GRAD", "POSTO", "P/G", "P G"], int(header_idx)
+                )
+                sug_su = sugerir_coluna(valores, ["SU", "SUBUNIDADE", "OM"], int(header_idx))
+                c_nome, c_grad, c_su = st.columns(3)
+                with c_nome:
+                    col_nome = st.selectbox(
+                        "Coluna Nome", indices, index=sug_nome or 0,
+                        format_func=rotulo_coluna, key="ag_col_nome"
+                    )
+                with c_grad:
+                    col_grad = st.selectbox(
+                        "Coluna Posto/Graduação", indices,
+                        index=sug_grad if sug_grad is not None else min(1, largura-1),
+                        format_func=rotulo_coluna, key="ag_col_grad"
+                    )
+                with c_su:
+                    col_su = st.selectbox(
+                        "Coluna SU", [None] + indices,
+                        index=(sug_su+1) if sug_su is not None else 0,
+                        format_func=lambda v: "Não informada" if v is None else rotulo_coluna(v),
+                        key="ag_col_su"
+                    )
+                cadastrados_ag = []
+                for row in valores[int(header_idx)+1:]:
+                    nome = str(row[col_nome]).strip()
+                    posto = extrair_posto(row[col_grad])
+                    if not nome or not posto:
+                        continue
+                    su_ag = str(row[col_su]).strip() if col_su is not None else ""
+                    cadastrados_ag.append({
+                        "Nome": nome,
+                        "Posto/Graduação": str(row[col_grad]).strip(),
+                        "SU": su_ag,
+                        "Categoria": posto,
+                        "Escalas possíveis": ", ".join(escalas_possiveis(posto))
+                    })
+                if cadastrados_ag:
+                    st.metric("Militares classificados", len(cadastrados_ag))
+                    escolha_ag = st.selectbox(
+                        "Pré-visualizar escala sugerida",
+                        ["Todos"] + list(ESCALAS_EFETIVO),
+                        key="ag_tipo_visualizacao"
+                    )
+                    registro_ag = [
+                        p for p in cadastrados_ag
+                        if escolha_ag == "Todos"
+                        or escolha_ag in escalas_possiveis(p["Categoria"])
+                    ]
+                    st.dataframe(
+                        pd.DataFrame(registro_ag), hide_index=True,
+                        use_container_width=True, height=370
+                    )
+                    st.caption(
+                        "Um militar pode aparecer em mais de uma escala possível, "
+                        "mas a designação real será definida manualmente. "
+                        "Motoristas exigem verificação da habilitação e autorização."
+                    )
+                else:
+                    st.warning(
+                        "Não foi possível identificar militares nessa seleção. "
+                        "Confira a linha do cabeçalho e as colunas de Nome "
+                        "e Posto/Graduação."
+                    )
             else:
                 st.info("A aba selecionada está vazia.")
     st.info(
