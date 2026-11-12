@@ -297,12 +297,37 @@ with st.sidebar:
         "Selecionar escala", OPCOES_ESCALAS,
         label_visibility="collapsed", key="menu_escalas"
     )
-    st.divider()
-    st.caption("PERÍODO")
-    inicio = st.date_input("Início", value=date.today().replace(day=1), format="DD/MM/YYYY")
-    qtd = st.selectbox("Quantidade de dias", [7, 14, 21, 28, 31], index=3)
-    filtro = st.selectbox("Subunidade", ["Todas"] + SU)
-    st.caption("PRETA: dias úteis comuns | VERMELHA: fins de semana e feriados nacionais.")
+# Configurações do quadro fora da barra lateral. A consulta AG e a
+# administração do efetivo não precisam mostrar filtros de datas.
+inicio = date.today().replace(day=1)
+qtd = 28
+filtro = "Todas"
+if escala_aberta in (
+    "🗓️ Previsão da Escala",
+    "🎖️ Oficial de Dia",
+    "📋 Adjunto de Dia",
+    "🛡️ Comandante da Guarda",
+    "🔰 Cabo da Guarda",
+    "🚗 Motorista de Dia",
+):
+    with st.expander("⚙️ Configurar período e subunidade", expanded=False):
+        coluna_inicio, coluna_dias, coluna_su = st.columns(3)
+        with coluna_inicio:
+            inicio = st.date_input(
+                "Início", value=inicio, format="DD/MM/YYYY", key="periodo_inicio"
+            )
+        with coluna_dias:
+            qtd = st.selectbox(
+                "Quantidade de dias", [7, 14, 21, 28, 31],
+                index=3, key="periodo_quantidade"
+            )
+        with coluna_su:
+            filtro = st.selectbox(
+                "Subunidade", ["Todas"] + SU, key="periodo_su"
+            )
+        st.caption(
+            "PRETA: dias úteis comuns | VERMELHA: fins de semana e feriados nacionais."
+        )
 
 if escala_aberta == "🔄 Efetivo online — AG":
     st.subheader("🔄 Efetivo online — Planilha AG")
