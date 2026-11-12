@@ -14,7 +14,7 @@ DIAS = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
 
 from google_sheets_store import conectar_google_sheets, GoogleSheetsError
 from escalas_funcionais import exibir_escala, SERVICOS
-from classificacao_ag import extrair_posto, escalas_possiveis, sugerir_coluna
+from classificacao_ag import extrair_posto, escalas_possiveis, sugerir_coluna, identificar_esquadrao, ESQUADROES, normalizar
 
 @st.cache_resource
 def conectar():
@@ -371,88 +371,164 @@ if escala_aberta == "🔄 Efetivo online — AG":
                     "Prévia em tempo real. Nenhum registro é gravado ou excluído "
                     "do cadastro da Escala Dragão ao consultar a AG."
                 )
-                st.markdown("### 🎖️ Separar militares por posto/graduação")
+                st.markdown("### 🐎 Efetivo por esquadrão / SU")
                 st.caption(
-                    "Classificação sugerida: Oficial de Dia (oficiais); "
-                    "Adjunto e Comandante da Guarda (sargentos/subtenentes); "
-                    "Cabo da Guarda (cabos); Motorista de Dia (cabos/soldados "
-                    "com habilitação confirmada). A classificação NÃO cadastra "
-                    "nem coloca ninguém de serviço automaticamente."
+                    "Separe os militares por 1º, 2º, 3º Esqd, Esqd Crm, "
+                    "Esqd C Ap, EM, CHDI e Fanfarra. A graduação é "
+                    "complementar, não obrigatória para identificar o militar."
+                )
+                # Encontra a linha de cabeçalho mesmo se houver títulos acima.
+                candidatos_header = []
+                for hi, hrow in enumerate(valores[:min(len(valores), 25)]):
+                    achados = sum(
+                        sugerir_coluna(valores, alvos, hi) is not None
+                        for alvos in (
+                            ["NOME", "MILITAR"],
+                            ["POSTO", "GRAD", "P/G"],
+                            ["SUBUNIDADE", "ESQUADRAO", "ESQD", "SU"],
+                        )
+                    )
+                    candidatos_header.append(achados)
+                melhor_header = (
+                    candidatos_header.index(max(candidatos_header))
+                    if candidatos_header and max(candidatos_header) > 0 else 0
                 )
                 header_idx = st.number_input(
-                    "Linha do cabeçalho na AG", min_value=1,
-                    max_value=len(valores), value=1, step=1, key="ag_header"
+                    "Linha do cabeçalho na AG",
+                    min_value=1, max_value=len(valores),
+                    value=melhor_header + 1, step=1, key="ag_cabecalho_esqd"
                 ) - 1
                 cabecalho = valores[int(header_idx)]
-                def rotulo_coluna(i):
-                    titulo = cabecalho[i].strip() if i < len(cabecalho) else ""
-                    return f"{i+1} — {titulo or f'Coluna {i+1}'}"
                 indices = list(range(largura))
-                sug_nome = sugerir_coluna(valores, ["NOME", "MILITAR"], int(header_idx))
-                sug_grad = sugerir_coluna(
-                    valores, ["GRAD", "POSTO", "P/G", "P G"], int(header_idx)
+
+                def rotulo_coluna(i):
+                    titulo = str(cabecalho[i]).strip()
+                    return f"{i+1} — {titulo or f'Coluna {i+1}'}"
+
+                sug_nome = sugerir_coluna(
+                    valores, ["NOME", "MILITAR"], int(header_idx)
                 )
-                sug_su = sugerir_coluna(valores, ["SU", "SUBUNIDADE", "OM"], int(header_idx))
-                c_nome, c_grad, c_su = st.columns(3)
-                with c_nome:
+                sug_grad = sugerir_coluna(
+                    valores, ["POSTO", "GRAD", "P/G"], int(header_idx)
+                )
+                sug_su = sugerir_coluna(
+                    valores, ["SUBUNIDADE", "ESQUADRAO", "ESQD", "SU"], int(header_idx)
+                )
+                ncol, gcol, scol = st.columns(3)
+                with ncol:
                     col_nome = st.selectbox(
-                        "Coluna Nome", indices, index=sug_nome or 0,
-                        format_func=rotulo_coluna, key="ag_col_nome"
+                        "Coluna Nome", indices,
+                        index=sug_nome if sug_nome is not None else 0,
+                        format_func=rotulo_coluna, key="ag_esqd_nome"
                     )
-                with c_grad:
+                with gcol:
                     col_grad = st.selectbox(
-                        "Coluna Posto/Graduação", indices,
-                        index=sug_grad if sug_grad is not None else min(1, largura-1),
-                        format_func=rotulo_coluna, key="ag_col_grad"
+                        "Coluna Posto/Graduação (opcional)",
+                        [None] + indices,
+                        index=sug_grad + 1 if sug_grad is not None else 0,
+                        format_func=lambda i: "Não informada" if i is None else rotulo_coluna(i),
+                        key="ag_esqd_grad"
                     )
-                with c_su:
+                with scol:
                     col_su = st.selectbox(
-                        "Coluna SU", [None] + indices,
-                        index=(sug_su+1) if sug_su is not None else 0,
-                        format_func=lambda v: "Não informada" if v is None else rotulo_coluna(v),
-                        key="ag_col_su"
+                        "Coluna Esquadrão/SU",
+                        [None] + indices,
+                        index=sug_su + 1 if sug_su is not None else 0,
+                        format_func=lambda i: (
+                            "Identificar na linha ou nome da aba"
+                            if i is None else rotulo_coluna(i)
+                        ),
+                        key="ag_esqd_su"
                     )
-                cadastrados_ag = []
+                agrupados = {su: [] for su in ESQUADROES}
+                nao_identificados = []
+                su_da_aba = identificar_esquadrao(aba_nome)
+                secao_atual = ""
                 for row in valores[int(header_idx)+1:]:
                     nome = str(row[col_nome]).strip()
-                    posto = extrair_posto(row[col_grad])
-                    if not nome or not posto:
-                        continue
-                    su_ag = str(row[col_su]).strip() if col_su is not None else ""
-                    cadastrados_ag.append({
-                        "Nome": nome,
-                        "Posto/Graduação": str(row[col_grad]).strip(),
-                        "SU": su_ag,
-                        "Categoria": posto,
-                        "Escalas possíveis": ", ".join(escalas_possiveis(posto))
-                    })
-                if cadastrados_ag:
-                    st.metric("Militares classificados", len(cadastrados_ag))
-                    escolha_ag = st.selectbox(
-                        "Pré-visualizar escala sugerida",
-                        ["Todos"] + list(ESCALAS_EFETIVO),
-                        key="ag_tipo_visualizacao"
+                    identificada = (
+                        identificar_esquadrao(row[col_su])
+                        if col_su is not None else ""
                     )
-                    registro_ag = [
-                        p for p in cadastrados_ag
-                        if escolha_ag == "Todos"
-                        or escolha_ag in escalas_possiveis(p["Categoria"])
+                    if not identificada:
+                        identificada = next(
+                            (identificar_esquadrao(valor) for valor in row
+                             if identificar_esquadrao(valor)), ""
+                        )
+                    valores_preenchidos = [
+                        str(v).strip() for v in row if str(v).strip()
                     ]
-                    st.dataframe(
-                        pd.DataFrame(registro_ag), hide_index=True,
-                        use_container_width=True, height=370
-                    )
-                    st.caption(
-                        "Um militar pode aparecer em mais de uma escala possível, "
-                        "mas a designação real será definida manualmente. "
-                        "Motoristas exigem verificação da habilitação e autorização."
+                    if identificada and len(valores_preenchidos) <= 2 and (
+                        not nome or identificar_esquadrao(nome)
+                    ):
+                        secao_atual = identificada
+                        continue
+                    if not nome or normalizar(nome) in (
+                        "NOME", "MILITAR", "NOME COMPLETO", "TOTAL",
+                        "EFETIVO", "POSTO", "GRAD", "GRADUACAO",
+                    ):
+                        continue
+                    # Não cria cadastros com linhas de totalizadores ou subtítulos.
+                    if normalizar(nome).startswith(("TOTAL ", "SUBTOTAL ", "QUANTIDADE ")):
+                        continue
+                    su_militar = identificada or secao_atual or su_da_aba
+                    graduacao = str(row[col_grad]).strip() if col_grad is not None else ""
+                    categoria = extrair_posto(graduacao) or extrair_posto(nome)
+                    militar_ag = {
+                        "Nome": nome,
+                        "Posto/Graduação": graduacao or categoria,
+                        "Esquadrão / SU": su_militar or "Não identificado",
+                        "Escalas possíveis": ", ".join(escalas_possiveis(categoria)),
+                    }
+                    if su_militar in agrupados:
+                        agrupados[su_militar].append(militar_ag)
+                    else:
+                        nao_identificados.append(militar_ag)
+
+                total_encontrados = sum(map(len, agrupados.values())) + len(nao_identificados)
+                c1, c2 = st.columns(2)
+                c1.metric("Registros identificados", total_encontrados)
+                c2.metric("Sem esquadrão identificado", len(nao_identificados))
+                if not total_encontrados:
+                    st.warning(
+                        "Nenhum nome encontrado. Confira a coluna Nome, "
+                        "a linha do cabeçalho e a aba da AG."
                     )
                 else:
-                    st.warning(
-                        "Não foi possível identificar militares nessa seleção. "
-                        "Confira a linha do cabeçalho e as colunas de Nome "
-                        "e Posto/Graduação."
+                    abas_su = st.tabs(
+                        list(ESQUADROES) + ["Não identificados"]
                     )
+                    for i, su_nome in enumerate(ESQUADROES):
+                        with abas_su[i]:
+                            efetivo_su = agrupados[su_nome]
+                            st.metric(f"Militares — {su_nome}", len(efetivo_su))
+                            if efetivo_su:
+                                st.dataframe(
+                                    pd.DataFrame(efetivo_su),
+                                    hide_index=True, use_container_width=True,
+                                    height=410
+                                )
+                            else:
+                                st.info("Nenhum militar identificado nesta SU.")
+                    with abas_su[-1]:
+                        if nao_identificados:
+                            st.warning(
+                                "Esses militares não tiveram o esquadrão "
+                                "reconhecido. Confira a coluna de SU antes "
+                                "de usar a lista para cadastros."
+                            )
+                            st.dataframe(
+                                pd.DataFrame(nao_identificados),
+                                hide_index=True, use_container_width=True,
+                                height=410
+                            )
+                        else:
+                            st.success("Todos os registros possuem SU reconhecida.")
+                st.caption(
+                    "A consulta é somente leitura: não altera cadastros, "
+                    "lotações, históricos ou serviços da Escala Dragão. "
+                    "A distribuição por graduação é apenas uma sugestão."
+                )
             else:
                 st.info("A aba selecionada está vazia.")
     st.info(
