@@ -59,3 +59,34 @@ def sugerir_coluna(linhas, nomes_alvo, linha_cabecalho):
         if any(nome in texto for nome in nomes_alvo):
             return i
     return None
+
+ESQUADROES = (
+    "EM", "1º Esqd", "2º Esqd", "3º Esqd", "Esqd Crm",
+    "Esqd C Ap", "CHDI", "Fanfarra",
+)
+
+
+def identificar_esquadrao(valor):
+    """Reconhece a SU com grafias alternativas; vazio se não for possível."""
+    t = normalizar(valor)
+    if not t:
+        return ""
+    t = re.sub(r"[º°ª.\\-/]", " ", t)
+    t = re.sub(r"\\s+", " ", t).strip()
+    if re.search(r"\\b(1|PRIMEIRO)\\s*(ESQD|ESQUADRAO)\\b", t):
+        return "1º Esqd"
+    if re.search(r"\\b(2|SEGUNDO)\\s*(ESQD|ESQUADRAO)\\b", t):
+        return "2º Esqd"
+    if re.search(r"\\b(3|TERCEIRO)\\s*(ESQD|ESQUADRAO)\\b", t):
+        return "3º Esqd"
+    if re.search(r"\\b(ESQD|ESQUADRAO)\\s*(CRM|CERIMONIAL)\\b", t):
+        return "Esqd Crm"
+    if re.search(r"\\b(ESQD|ESQUADRAO)\\s*C\\s*AP\\b", t):
+        return "Esqd C Ap"
+    if re.search(r"\\b(CHDI)\\b", t):
+        return "CHDI"
+    if re.search(r"\\b(FANFARRA)\\b", t):
+        return "Fanfarra"
+    if re.fullmatch(r"EM|ESTADO MAIOR|EST MAIOR", t):
+        return "EM"
+    return ""
